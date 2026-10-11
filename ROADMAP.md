@@ -15,11 +15,12 @@ This is the plan, not a promise. Order may change. Ideas welcome in [Issues](htt
 | v2.1.0 | Auto Game Mode | Bonks when a game starts, paroles when it quits |
 | v2.2.0 | Hog Radar | Flags heavy apps that are not on your list yet |
 | v2.3.0 | Startup Jail | Stop apps from launching at login, fully reversible |
+| v2.4.0 | Profiles, CPU and disk | Gaming/streaming/work/battery profiles, CPU hogs, turbo power plan |
 
 ## 🔜 Next up
 
-### v2.4.0 · Profiles, CPU and disk
-Gaming, Streaming (keeps Discord and OBS), Work and Battery profiles. CPU and disk hog detection, not just RAM. Optional High Performance power plan while bonked.
+### v2.6.0 · Solitary Confinement
+Apps that sneak back up after a bonk get thrown straight back in, and you'll see how many escape attempts they made.
 
 ### v2.5.0 · Hotkeys, Stream Deck and stats
 `Ctrl+Alt+B` to bonk from inside a game. Command-line switches for Stream Deck buttons. Lifetime stats, achievements, and a hall of shame for repeat offenders.

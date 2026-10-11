@@ -1,5 +1,12 @@
 # Bonk Mode changelog
 
+## v2.4.0 - Profiles, CPU and Disk
+- Profiles: gaming, streaming, work and battery. Each remembers its own checkboxes. The first visit seeds sensible defaults: streaming spares Discord, OBS and Spotify; work spares Teams, Slack, Zoom and your browsers and sentences game launchers; battery sentences nearly everything. Switch from the purple PROFILE button on Home, Settings, or the tray menu.
+- Every card now shows CPU (as a share of your whole machine) and disk activity. Anything burning more than 8% of the CPU gets a flashing CPU HOG badge.
+- Dossiers show CPU and disk, and the live chart draws CPU (orange) on top of RAM (green).
+- Hog Radar now also flags apps chewing 10% or more of the CPU, even when their RAM is small.
+- Turbo power plan (opt-in): Windows switches to High performance while you're bonked and back to your own plan on parole. The original plan is saved first, so a crash can't strand you; it's restored the next time the tray starts.
+
 ## v2.3.0 - Startup Jail
 - New STARTUP screen (key 4): every app that launches when you log in, from both Run keys, the 32-bit Run key and both Startup folders, with how heavy it is right now.
 - Click STARTS to jail an app from startup, click JAILED to parole it back. It uses Windows' own StartupApproved switch, the same one Task Manager's Startup tab uses, so nothing is ever deleted and Task Manager shows the same state.

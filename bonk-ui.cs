@@ -347,17 +347,48 @@ namespace BonkMode
         }
     }
 
+    // Per-process CPU time and disk bytes, read with the lightest access right Windows offers.
+    public static class ProcStats
+    {
+        [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr h, out long create, out long exit, out long kernel, out long user);
+        [StructLayout(LayoutKind.Sequential)]
+        struct IoCounters { public ulong ReadOps, WriteOps, OtherOps, ReadBytes, WriteBytes, OtherBytes; }
+        [DllImport("kernel32.dll")] static extern bool GetProcessIoCounters(IntPtr h, out IoCounters c);
+        const int QueryLimited = 0x1000;
+
+        // Fills cpu (100ns units of kernel+user time) and io (bytes read+written); -1 where unreadable.
+        public static void SampleMany(int[] pids, long[] cpu, long[] io)
+        {
+            for (int i = 0; i < pids.Length; i++)
+            {
+                cpu[i] = -1; io[i] = -1;
+                IntPtr h = OpenProcess(QueryLimited, false, pids[i]);
+                if (h == IntPtr.Zero) continue;
+                try
+                {
+                    long c, e, k, u;
+                    if (GetProcessTimes(h, out c, out e, out k, out u)) cpu[i] = k + u;
+                    IoCounters ioc;
+                    if (GetProcessIoCounters(h, out ioc)) io[i] = (long)(ioc.ReadBytes + ioc.WriteBytes);
+                }
+                finally { CloseHandle(h); }
+            }
+        }
+    }
     // ================================================================== model
 
     public class AppInfo
     {
         public string Label, Names, Relaunch;
-        public int MB, Procs, Hash, Number;
+        public int MB, Procs, Hash, Number, Cpu10, IoKB;
         public bool Enabled, Running, Jailed, Suspect;
         public string Proc;
         public RectangleF Rect;
         public float Shake, Flash, Bars, ShownMB, Nervous;
         public List<int> History = new List<int>();
+        public List<int> CpuHistory = new List<int>();
     }
 
     class Inmate
@@ -445,6 +476,8 @@ namespace BonkMode
             new[] { "hammer", "cycle:fast,normal,dramatic", "Hammer speed", "How long each swing takes. Dramatic is very dramatic." },
             new[] { "polite", "cycle:2,4,8", "Polite warning", "Seconds apps get to close nicely before the hammer falls." },
             new[] { "gameMode", "cycle:off,ask,auto", "Auto game mode", "Bonk when a game starts, parole when it quits. Ask = 5 second countdown you can cancel." },
+            new[] { "profile", "cycle:gaming,streaming,work,battery", "Profile", "Each profile remembers its own checkboxes. Streaming spares Discord and OBS; work spares office apps." },
+            new[] { "powerPlan", "bool", "Turbo power plan", "Switch Windows to High performance while bonked; your old plan comes back on parole." },
             new[] { "radar", "bool", "Hog radar", "Flag heavy apps that are not on your list yet. Sweeps every 30 seconds." },
             new[] { "radarMB", "cycle:200,400,800,1500", "Radar threshold", "How much RAM an unlisted app needs before it becomes a suspect." },
             new[] { "autostart", "bool", "Start with Windows", "Put the hammer in the tray at login." },
@@ -552,6 +585,7 @@ namespace BonkMode
             settings["music"] = "True"; settings["volume"] = "60"; settings["sfx"] = "True"; settings["shake"] = "True";
             settings["scanlines"] = "True"; settings["hammer"] = "normal"; settings["polite"] = "4";
             settings["autostart"] = "False"; settings["autoUpdate"] = "True";
+            settings["gameMode"] = "ask"; settings["radar"] = "True"; settings["radarMB"] = "400"; settings["profile"] = "gaming"; settings["powerPlan"] = "False";
 
             if (!NoAudio) { try { audio = new ChipAudio(); } catch { audio = null; } }
             sfxBonk = Synth.Bonk(); sfxClick = Synth.Click(); sfxBlip = Synth.Blip(); sfxWhoosh = Synth.Whoosh();
@@ -617,9 +651,9 @@ namespace BonkMode
 
         public void PreviewUpdate(string remote, string log) { FinishCheck(remote, log, null); }
 
-        public void SetApps(string[] labels, int[] mb, bool[] enabled, bool[] running, bool[] jailed, int[] procs, string[] names, string[] relaunch)
+        public void SetApps(string[] labels, int[] mb, bool[] enabled, bool[] running, bool[] jailed, int[] procs, string[] names, string[] relaunch, int[] cpu10, int[] iokb)
         {
-            if (hammerIdx >= 0) { pending = new object[] { labels, mb, enabled, running, jailed, procs, names, relaunch }; return; }
+            if (hammerIdx >= 0) { pending = new object[] { labels, mb, enabled, running, jailed, procs, names, relaunch, cpu10, iokb }; return; }
             Dictionary<string, AppInfo> old = new Dictionary<string, AppInfo>();
             foreach (AppInfo x in apps) old[x.Label] = x;
             apps.Clear();
@@ -636,7 +670,12 @@ namespace BonkMode
                 a.MB = mb[i]; a.Enabled = enabled[i]; a.Running = running[i];
                 a.Jailed = jailed[i] && !running[i];
                 a.Procs = procs[i]; a.Names = names[i]; a.Relaunch = relaunch[i];
-                if (a.Running) { a.History.Add(a.MB); if (a.History.Count > 72) a.History.RemoveAt(0); }
+                a.Cpu10 = cpu10[i]; a.IoKB = iokb[i];
+                if (a.Running)
+                {
+                    a.History.Add(a.MB); if (a.History.Count > 72) a.History.RemoveAt(0);
+                    a.CpuHistory.Add(a.Cpu10); if (a.CpuHistory.Count > 72) a.CpuHistory.RemoveAt(0);
+                }
                 if (a.Jailed) jailCount++;
                 apps.Add(a);
             }
@@ -743,7 +782,7 @@ namespace BonkMode
             if (pending != null)
             {
                 object[] p = pending; pending = null;
-                SetApps((string[])p[0], (int[])p[1], (bool[])p[2], (bool[])p[3], (bool[])p[4], (int[])p[5], (string[])p[6], (string[])p[7]);
+                SetApps((string[])p[0], (int[])p[1], (bool[])p[2], (bool[])p[3], (bool[])p[4], (int[])p[5], (string[])p[6], (string[])p[7], (int[])p[8], (int[])p[9]);
             }
             else { SyncInmates(); LayoutHome(); }
         }
@@ -758,7 +797,7 @@ namespace BonkMode
             return null;
         }
 
-        public void SetSuspects(string[] procs, string[] labels, int[] mb, int[] count)
+        public void SetSuspects(string[] procs, string[] labels, int[] mb, int[] count, int[] cpu10)
         {
             Dictionary<string, AppInfo> old = new Dictionary<string, AppInfo>();
             foreach (AppInfo x in suspects) old[x.Proc] = x;
@@ -772,7 +811,7 @@ namespace BonkMode
                     a = new AppInfo(); a.Proc = procs[i]; a.Suspect = true; a.Running = true;
                     a.Hash = StableHash(procs[i]); a.Number = 1000 + (a.Hash % 9000); fresh = true;
                 }
-                a.Label = labels[i]; a.MB = mb[i]; a.Procs = count[i]; a.Names = procs[i];
+                a.Label = labels[i]; a.MB = mb[i]; a.Procs = count[i]; a.Names = procs[i]; a.Cpu10 = cpu10[i];
                 suspects.Add(a);
             }
             if (fresh) { radarPing = 0; Play(sfxBlip); }
@@ -1519,9 +1558,7 @@ namespace BonkMode
             Color bonkBg = tCount > 0 && !Busy ? ((int)(t * 4) % 2 == 0 ? Color.FromArgb(150, 0, 0) : Color.FromArgb(210, 40, 0)) : Color.FromArgb(40, 40, 40);
             Button(g, new RectangleF(20, BtnY, 300, 32), Busy ? "[ BoNKiNG... ]" : "[ BoNK 'eM aLL (" + tCount + ") ]", "bonk", bonkBg, Color.Yellow, !Busy);
             Button(g, new RectangleF(330, BtnY, 200, 32), "[ PaRoLe aLL (" + jailCount + ") ]", "parole", Color.FromArgb(0, 40, 20), Green, !Busy);
-            bool musicOn = IsTrue(settings["music"]);
-            string note = ((char)0x266A).ToString();
-            Button(g, new RectangleF(540, BtnY, 190, 32), "[ " + note + " MuSiC " + (musicOn ? "oN" : "oFF") + " ]", "music", Color.FromArgb(0, 40, 20), Green, true);
+            Button(g, new RectangleF(540, BtnY, 190, 32), "[ PRoFiLe: " + Leet(settings.ContainsKey("profile") ? settings["profile"] : "gaming") + " > ]", "set:profile:next", Color.FromArgb(40, 0, 60), Color.FromArgb(220, 140, 255), !Busy);
             Button(g, new RectangleF(740, BtnY, 200, 32), "[ eDiT LiST ]", "edit", Color.FromArgb(0, 40, 20), Green, true);
         }
 
@@ -1563,7 +1600,15 @@ namespace BonkMode
             SizeF cs = g.MeasureString(chip, fTiny);
             g.FillRectangle(B(cc), r.X + 5, r.Y + 5, cs.Width, 13);
             g.DrawString(chip, fTiny, Brushes.Black, r.X + 5, r.Y + 6);
-            if (!jailed) g.DrawString("x" + a.Procs, fTiny, B(Color.Gray), new RectangleF(r.X, r.Y + 6, r.Width - 6, 12), RightAlign());
+            if (!jailed && a.Cpu10 >= 80)
+            {
+                // burning more than 8% of the whole CPU
+                SizeF hs = g.MeasureString("CPU HoG", fTiny);
+                Color hc = (int)(t * 5) % 2 == 0 ? Color.FromArgb(255, 120, 0) : Red;
+                g.FillRectangle(B(hc), r.Right - hs.Width - 6, r.Y + 5, hs.Width, 13);
+                g.DrawString("CPU HoG", fTiny, Brushes.Black, r.Right - hs.Width - 6, r.Y + 6);
+            }
+            else if (!jailed) g.DrawString("x" + a.Procs, fTiny, B(Color.Gray), new RectangleF(r.X, r.Y + 6, r.Width - 6, 12), RightAlign());
 
             RectangleF nr = new RectangleF(r.X + 6, r.Y + 22, r.Width - 12, 40);
             g.DrawString(a.Label, fName, Brushes.Black, new RectangleF(nr.X + 1, nr.Y + 1, nr.Width, nr.Height), sfWrap);
@@ -1572,7 +1617,8 @@ namespace BonkMode
             if (!jailed)
             {
                 Color mbc = a.MB >= 1024 ? Color.FromArgb(255, 80, 80) : a.MB >= 300 ? Color.Yellow : Green;
-                g.DrawString(FormatShort(a.ShownMB), fTileBig, B(mbc), new RectangleF(r.X, r.Y + 62, r.Width, 22), sfCenter);
+                g.DrawString(FormatShort(a.ShownMB), fTileBig, B(mbc), new RectangleF(r.X, r.Y + 56, r.Width, 22), sfCenter);
+                g.DrawString("CPU " + FormatCpu(a.Cpu10) + "  DiSK " + FormatIo(a.IoKB), fTiny, B(a.Cpu10 >= 80 ? Color.FromArgb(255, 150, 60) : Color.FromArgb(140, 160, 140)), new RectangleF(r.X, r.Y + 76, r.Width, 12), sfCenter);
             }
             else g.DrawString(Leet("serving time"), fTiny, B(Color.FromArgb(200, 200, 210)), new RectangleF(r.X, r.Y + 64, r.Width, 18), sfCenter);
 
@@ -1614,7 +1660,8 @@ namespace BonkMode
             RectangleF nr = new RectangleF(r.X + 6, r.Y + 22, r.Width - 12, 26);
             g.DrawString(a.Label, fName, B(Color.White), nr, sfWrap);
             Color mbc = a.MB >= 1024 ? Color.FromArgb(255, 80, 80) : Color.Yellow;
-            g.DrawString(FormatShort(a.MB) + "  x" + a.Procs, fTileBig, B(mbc), new RectangleF(r.X, r.Y + 48, r.Width, 22), sfCenter);
+            g.DrawString(FormatShort(a.MB) + "  x" + a.Procs, fTileBig, B(mbc), new RectangleF(r.X, r.Y + 46, r.Width, 22), sfCenter);
+            if (a.Cpu10 > 0) g.DrawString("CPU " + FormatCpu(a.Cpu10), fTiny, B(a.Cpu10 >= 100 ? Color.FromArgb(255, 150, 60) : Color.FromArgb(160, 160, 120)), new RectangleF(r.X, r.Y + 66, r.Width, 12), sfCenter);
         }
 
         void DrawSuspectButtons(Graphics g, AppInfo a, RectangleF r, Rectangle area)
@@ -1912,6 +1959,7 @@ namespace BonkMode
             fy = Field(g, "STaTuS", stat, fx, fy, wText, s.Running ? Green : Color.Gray);
             fy = Field(g, "SeNTeNCe", sentence, fx, fy, wText, s.Enabled ? Red : Green);
             fy = Field(g, "RaM NoW", s.Running ? FormatSize(s.MB) : "0 MB", fx, fy, wText, Color.Yellow);
+            fy = Field(g, "CPU / DiSK", s.Running ? FormatCpu(s.Cpu10) + " oF YouR CPU  ::  " + FormatIo(s.IoKB) + " DiSK" : "-", fx, fy, wText, s.Cpu10 >= 80 ? Color.FromArgb(255, 150, 60) : Color.FromArgb(200, 210, 200));
             fy = Math.Max(fy, mug.Bottom + 6);
             fy = Field(g, "aLiaSeS", s.Names, fx, fy, panel.Width - 32, Color.FromArgb(200, 210, 200));
             fy = Field(g, "PaRoLe PLaN", s.Relaunch, fx, fy, panel.Width - 32, Color.FromArgb(200, 210, 200));
@@ -1921,7 +1969,7 @@ namespace BonkMode
             Rectangle chart = new Rectangle(panel.X + 16, panel.Bottom - 104, panel.Width - 32, 50);
             g.FillRectangle(B(Color.FromArgb(10, 20, 14)), chart);
             g.DrawRectangle(P(DimGreen), chart);
-            g.DrawString(Leet("ram history (live while this window is open)"), fTiny, B(Color.Gray), chart.X, chart.Y - 12);
+            g.DrawString(Leet("ram (green) and cpu (orange) history, live while this window is open"), fTiny, B(Color.Gray), chart.X, chart.Y - 12);
             if (s.History.Count > 1)
             {
                 int max = 1; foreach (int v in s.History) max = Math.Max(max, v);
@@ -1930,6 +1978,15 @@ namespace BonkMode
                     pts[i] = new PointF(chart.X + 2 + i * (chart.Width - 4f) / (s.History.Count - 1), chart.Bottom - 3 - s.History[i] * (chart.Height - 6f) / max);
                 g.DrawLines(P(Green), pts);
                 g.DrawString(FormatShort(max) + " PeaK", fTiny, B(Green), chart.Right - 64, chart.Y + 2);
+                if (s.CpuHistory.Count > 1)
+                {
+                    int cmax = 10; foreach (int v in s.CpuHistory) cmax = Math.Max(cmax, v);
+                    PointF[] cp = new PointF[s.CpuHistory.Count];
+                    for (int i = 0; i < cp.Length; i++)
+                        cp[i] = new PointF(chart.X + 2 + i * (chart.Width - 4f) / (s.CpuHistory.Count - 1), chart.Bottom - 3 - s.CpuHistory[i] * (chart.Height - 6f) / cmax);
+                    g.DrawLines(P(Color.FromArgb(255, 150, 60)), cp);
+                    g.DrawString("CPU " + FormatCpu(cmax) + " PeaK", fTiny, B(Color.FromArgb(255, 150, 60)), chart.Right - 64, chart.Y + 14);
+                }
             }
             else g.DrawString(Leet(s.Running ? "collecting samples..." : "nothing to chart. it's asleep."), fTiny, B(Color.Gray), chart.X + 6, chart.Y + 18);
 
@@ -2486,6 +2543,10 @@ namespace BonkMode
         {
             return mb >= 1024 ? (mb / 1024).ToString("0.0", Inv) + "G" : ((int)Math.Round(mb)).ToString(Inv) + "M";
         }
+
+        static string FormatCpu(int cpu10) { return (cpu10 / 10.0).ToString(cpu10 >= 100 ? "0" : "0.0", Inv) + "%"; }
+
+        static string FormatIo(int kb) { return kb >= 1024 ? (kb / 1024.0).ToString("0.0", Inv) + "MB/s" : kb + "KB/s"; }
 
         static string Initials(string label)
         {

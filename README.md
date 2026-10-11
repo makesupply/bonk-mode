@@ -46,6 +46,10 @@ Every app on your list gets a card with its **full name**, live RAM, and process
 
 **Left-click** a card to sentence or spare it. **Right-click** for its dossier. Hover for the full process list.
 
+Every card also shows **CPU** (as a share of your whole machine) and **disk** activity, and anything burning more than 8% of your CPU gets a flashing **CPU HOG** badge.
+
+**Profiles:** the purple **PROFILE** button flips between **gaming**, **streaming** (spares Discord, OBS and Spotify), **work** (spares Teams, Slack, Zoom and browsers, bonks game launchers) and **battery** (bonks nearly everything). Each profile remembers its own checkboxes.
+
 ### The bonk
 
 ![Bonk animation](screenshots/bonk.png)
@@ -168,7 +172,9 @@ Everything is inside the app on screen **5**, and every change saves instantly.
 | Hammer speed | Fast, normal, or **dramatic**. Dramatic is very dramatic. |
 | Polite warning | 2, 4 or 8 seconds for apps to close nicely before the hammer. |
 | Auto game mode | **Off**, **ask** (5 second countdown you can cancel) or **auto**. |
-| Hog radar | Flag heavy apps that aren't on your list. |
+| Profile | Gaming, streaming, work or battery. Each keeps its own checkboxes. |
+| Turbo power plan | Off by default. High performance while bonked, your own plan back on parole. A crash can't strand you on it. |
+| Hog radar | Flag heavy apps (RAM or 10%+ CPU) that aren't on your list. |
 | Radar threshold | 200, 400, 800 or 1500 MB before an app becomes a suspect. |
 | Start with Windows | Hammer in the tray at login. |
 | Check for updates | Looks for a new release on GitHub on open and every 6 hours. |
@@ -233,6 +239,11 @@ None of these close anything:
 ---
 
 ## 📜 Version history
+
+### v2.4.0 · Profiles, CPU and disk
+- Gaming, streaming, work and battery profiles that remember their own checkboxes.
+- CPU and disk on every card, CPU HOG badges, CPU line on the dossier chart, radar catches CPU hogs.
+- Opt-in turbo power plan while bonked, crash-safe restore.
 
 ### v2.3.0 · Startup Jail
 - New Startup screen: jail apps from launching at login with Windows' own switch. Nothing deleted, fully reversible.

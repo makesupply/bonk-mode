@@ -54,7 +54,7 @@ $Version = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath 
 
 $DefaultSettings = [ordered]@{
     music = 'True'; volume = '60'; sfx = 'True'; shake = 'True'; scanlines = 'True'
-    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'; radar = 'True'; radarMB = '400'
+    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'; radar = 'True'; radarMB = '400'; profile = 'gaming'; powerPlan = 'False'
 }
 
 function Read-Settings {
@@ -137,10 +137,40 @@ function Get-Snapshot {
         $seen[$key] = $true
         if ($script:PathCache.ContainsKey($key)) { $path = $script:PathCache[$key] }
         else { $path = $null; try { $path = $p.Path } catch { }; $script:PathCache[$key] = $path }
-        [void]$out.Add([pscustomobject]@{ Proc = $p; Name = $p.ProcessName; Path = $path; WS = $p.WorkingSet64 })
+        [void]$out.Add([pscustomobject]@{ Proc = $p; Name = $p.ProcessName; Path = $path; WS = $p.WorkingSet64; CPU = 0.0; IOKB = 0 })
     }
     foreach ($k in @($script:PathCache.Keys)) { if (-not $seen.ContainsKey($k)) { $script:PathCache.Remove($k) } }
+    Add-RateSamples $out
     $out
+}
+
+# CPU % (of the whole machine) and disk KB/s since the previous snapshot, per process.
+# Needs the compiled helper; without it (dry runs) rates simply stay 0.
+$script:Samples = @{}
+$script:SampleClock = [System.Diagnostics.Stopwatch]::StartNew()
+$Cores = [Environment]::ProcessorCount
+
+function Add-RateSamples($Rows) {
+    if (-not ('BonkMode.ProcStats' -as [type]) -or -not $Rows.Count) { return }
+    $pids = [int[]]@($Rows | ForEach-Object { $_.Proc.Id })
+    $cpu = New-Object long[] $pids.Length
+    $io = New-Object long[] $pids.Length
+    [BonkMode.ProcStats]::SampleMany($pids, $cpu, $io)
+    $now = $script:SampleClock.Elapsed.TotalSeconds
+    $next = @{}
+    for ($i = 0; $i -lt $pids.Length; $i++) {
+        if ($cpu[$i] -lt 0) { continue }
+        $prev = $script:Samples[$pids[$i]]
+        if ($prev) {
+            $dt = $now - $prev[0]
+            if ($dt -gt 0.5) {
+                $Rows[$i].CPU = [math]::Max(0, ($cpu[$i] - $prev[1]) / ($dt * 1e7) / $Cores * 100)
+                if ($io[$i] -ge 0 -and $prev[2] -ge 0) { $Rows[$i].IOKB = [int][math]::Max(0, ($io[$i] - $prev[2]) / $dt / 1024) }
+                $next[$pids[$i]] = @($now, $cpu[$i], $io[$i])
+            } else { $next[$pids[$i]] = $prev }
+        } else { $next[$pids[$i]] = @($now, $cpu[$i], $io[$i]) }
+    }
+    $script:Samples = $next
 }
 
 function Get-Rows {
@@ -164,8 +194,8 @@ function Get-Rows {
                 foreach ($pat in $paths) { if ($r.Path -like $pat) { $ids[$r.Proc.Id] = 1; [void]$hits.Add($r); break } }
             }
         }
-        $bytes = 0
-        foreach ($r in $hits) { $bytes += $r.WS }
+        $bytes = 0; $cpuSum = 0.0; $ioSum = 0
+        foreach ($r in $hits) { $bytes += $r.WS; $cpuSum += $r.CPU; $ioSum += $r.IOKB }
         [pscustomobject]@{
             Entry   = $e
             Label   = [string]$e.label
@@ -173,6 +203,8 @@ function Get-Rows {
             Procs   = @($hits)
             Running = ($hits.Count -gt 0)
             MB      = [math]::Round($bytes / 1MB)
+            CPU     = [math]::Round($cpuSum, 1)
+            IOKB    = $ioSum
         }
     }
 }
@@ -294,13 +326,13 @@ function Get-Suspects {
     }
     foreach ($name in $groups.Keys) {
         $rows = $groups[$name]
-        $bytes = 0; foreach ($r in $rows) { $bytes += $r.WS }
+        $bytes = 0; $cpu = 0.0; foreach ($r in $rows) { $bytes += $r.WS; $cpu += $r.CPU }
         $mb = [math]::Round($bytes / 1MB)
-        if ($mb -lt $threshold) { continue }
+        if ($mb -lt $threshold -and $cpu -lt 10) { continue }   # heavy on RAM, or chewing 10%+ of the CPU
         $path = ($rows | Where-Object { $_.Path } | Select-Object -First 1).Path
         $label = $name
         if ($path) { try { $desc = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($path).FileDescription; if ($desc -and $desc.Trim()) { $label = $desc.Trim() } } catch { } }
-        [pscustomobject]@{ Name = $name; Label = $label; MB = [int]$mb; Procs = $rows.Count; Path = $path }
+        [pscustomobject]@{ Name = $name; Label = $label; MB = [int]$mb; Procs = $rows.Count; Path = $path; CPU = [math]::Round($cpu, 1) }
     }
 }
 
@@ -316,6 +348,86 @@ function Set-SpareForever([string]$Name) {
     $script:Config.spareForever = @(@($script:Config.spareForever) + $Name | Where-Object { $_ } | Select-Object -Unique)
     Save-Config
     Write-Log ('radar: spared {0} forever' -f $Name)
+}
+
+# ---------------------------------------------------------------------------
+# Profiles: each one remembers its own checkboxes. First visit seeds sensible
+# defaults from your current list.
+# ---------------------------------------------------------------------------
+
+$ProfileNames = @('gaming', 'streaming', 'work', 'battery')
+$ProfileSpare = @{
+    streaming = '(?i)discord|obs|spotify|stream ?deck|elgato|streamlabs|voicemod|broadcast|music'
+    work      = '(?i)teams|slack|zoom|outlook|onedrive|dropbox|google drive|edge|chrome|firefox|office|acrobat|notion|phone link'
+    battery   = '(?i)discord|voice|fxsound|audio|sound'
+}
+$ProfileSentence = @{
+    work    = '(?i)steam|epic|ea app|ubisoft|battle\.net|xbox|razer|icue|g hub|armoury|roblox|overwolf|game'
+    battery = '.'
+}
+
+function Switch-Profile([string]$Name) {
+    if ($ProfileNames -notcontains $Name) { throw "unknown profile: $Name" }
+    $current = [string]$script:Settings.profile
+    if (-not $script:Config.PSObject.Properties['profiles']) { $script:Config | Add-Member -NotePropertyName profiles -NotePropertyValue ([pscustomobject]@{}) }
+    $store = $script:Config.profiles
+    $now = @($script:Config.apps | Where-Object { $_.enabled } | ForEach-Object { [string]$_.label })
+    if ($store.PSObject.Properties[$current]) { $store.$current = $now } else { $store | Add-Member -NotePropertyName $current -NotePropertyValue $now }
+    if ($store.PSObject.Properties[$Name]) {
+        $want = @($store.$Name)
+        foreach ($e in $script:Config.apps) { $e.enabled = $want -contains [string]$e.label }
+    } else {
+        foreach ($e in $script:Config.apps) {
+            $text = ([string]$e.label) + ' ' + (@($e.names) -join ' ')
+            if ($ProfileSpare[$Name] -and $text -match $ProfileSpare[$Name]) { $e.enabled = $false }
+            elseif ($ProfileSentence[$Name] -and $text -match $ProfileSentence[$Name]) { $e.enabled = $true }
+        }
+    }
+    $script:Settings.profile = $Name
+    Save-Config
+    Save-Settings
+    Write-Log ('profile: {0} -> {1}' -f $current, $Name)
+}
+
+# ---------------------------------------------------------------------------
+# Turbo power plan: High performance while bonked, the original plan on parole.
+# The original is written to bonk-power.json first so a crash can't strand you.
+# ---------------------------------------------------------------------------
+
+$PowerFile = Join-Path $AppDir 'bonk-power.json'
+
+function Get-ActivePlan {
+    $ErrorActionPreference = 'Continue'
+    $o = (& powercfg /getactivescheme 2>$null) | Out-String
+    if ($o -match '([0-9a-fA-F]{8}-[0-9a-fA-F-]{27})') { $Matches[1].ToLower() }
+}
+
+function Enable-TurboPower {
+    if ($script:Settings.powerPlan -ne 'True' -or $script:Settings.profile -eq 'battery' -or (Test-Path -LiteralPath $PowerFile)) { return }
+    $ErrorActionPreference = 'Continue'
+    $orig = Get-ActivePlan
+    if (-not $orig) { return }
+    foreach ($g in '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c', 'e9a42b02-d5df-448d-aa00-03f14749eb61') {   # High performance, Ultimate
+        if ($g -eq $orig) { return }
+        & powercfg /setactive $g 2>$null | Out-Null
+        if ((Get-ActivePlan) -eq $g) {
+            @{ original = $orig; turbo = $g } | ConvertTo-Json | Set-Content -LiteralPath $PowerFile -Encoding UTF8
+            Write-Log ('power plan: turbo {0} on, was {1}' -f $g, $orig)
+            return
+        }
+    }
+    Write-Log 'power plan: this PC has no High performance plan, left it alone'
+}
+
+function Restore-PowerPlan {
+    if (-not (Test-Path -LiteralPath $PowerFile)) { return }
+    $ErrorActionPreference = 'Continue'
+    try {
+        $s = Get-Content -LiteralPath $PowerFile -Raw | ConvertFrom-Json
+        & powercfg /setactive $s.original 2>$null | Out-Null
+        Write-Log ('power plan: restored {0}' -f $s.original)
+    } catch { }
+    Remove-Item -LiteralPath $PowerFile -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------------------
@@ -557,6 +669,7 @@ function Invoke-BonkCore([switch]$Quiet, [string]$Only) {
         $msg += ' Dodged the bonk (probably need admin): ' + ($dodgers -join ', ')
         Write-Log ('dodged: ' + ($dodgers -join ', '))
     }
+    if (@(Read-State).Count) { Enable-TurboPower }
     if (-not $Quiet) { Show-Balloon "BONK! $Hammer" $msg }
     Update-Tip
     $msg
@@ -588,6 +701,7 @@ function Invoke-ReleaseCore([switch]$Quiet, [string]$Only, [string[]]$Labels) {
         $back += $j.label
     }
     Save-State $keep
+    if (-not @(Read-State).Count) { Restore-PowerPlan }
     Write-Log ('RELEASE: ' + ($back -join ', '))
     $msg = if ($back.Count) { 'Parole granted: ' + ($back -join ', ') + '.' } else { 'Everyone was already out.' }
     if ($stay.Count) { $msg += ' Comes back on its own or when you open it: ' + ($stay -join ', ') + '.' }
@@ -645,7 +759,9 @@ function Push-UiApps {
                 ($live -join ', ') + $(if ($n.Count -gt $live.Count) { '  (watching: ' + ($n -join ', ') + ')' } else { '' })
             } else { $n -join ', ' }
         }),
-        [string[]]@($show | ForEach-Object { Get-RelaunchSummary $_.Entry }))
+        [string[]]@($show | ForEach-Object { Get-RelaunchSummary $_.Entry }),
+        [int[]]@($show | ForEach-Object { [int]($_.CPU * 10) }),
+        [int[]]@($show | ForEach-Object { [int]$_.IOKB }))
 }
 
 function Push-UiSettings {
@@ -825,7 +941,7 @@ function Push-UiSuspects {
     if (-not $script:Ui -or $script:Ui.IsDisposed) { return }
     $s = @($script:Suspects | Sort-Object MB -Descending)
     $script:Ui.SetSuspects([string[]]@($s | ForEach-Object { $_.Name }), [string[]]@($s | ForEach-Object { $_.Label }),
-        [int[]]@($s | ForEach-Object { $_.MB }), [int[]]@($s | ForEach-Object { $_.Procs }))
+        [int[]]@($s | ForEach-Object { $_.MB }), [int[]]@($s | ForEach-Object { $_.Procs }), [int[]]@($s | ForEach-Object { [int]($_.CPU * 10) }))
 }
 
 function Invoke-RadarTick {
@@ -872,7 +988,13 @@ function New-BonkWindow {    Import-BonkUi
         param($key, $value)
         try {
             if ($key -eq 'autostart') { Set-Autostart ($value -eq 'True') }
+            elseif ($key -eq 'profile') {
+                Switch-Profile $value
+                Push-UiApps
+                $script:Ui.SetStatus(('profile: {0}. your checkboxes switched with it.' -f $value))
+            }
             else { $script:Settings[$key] = $value; Save-Settings }
+            if ($key -eq 'powerPlan' -and $value -ne 'True') { Restore-PowerPlan }
             if ($key -eq 'gameMode') { if ($value -eq 'off') { $script:PendingDue = $null }; Update-UiGame }
         } catch { Write-Log ('setting failed: ' + $_.Exception.Message) }
     })
@@ -1038,6 +1160,24 @@ function Build-Menu {
     }
     [void]$menu.Items.Add($gm)
 
+    $pm = New-Object System.Windows.Forms.ToolStripMenuItem ('Profile: ' + $script:Settings.profile)
+    foreach ($m in $ProfileNames) {
+        $it = New-Object System.Windows.Forms.ToolStripMenuItem $m
+        $it.Checked = ($script:Settings.profile -eq $m)
+        $it.Tag = 'pf:' + $m
+        $it.add_Click({
+            param($s, $e)
+            try {
+                $v = $s.Tag.Substring(3)
+                Switch-Profile $v
+                if ($script:Ui -and -not $script:Ui.IsDisposed) { $script:Ui.SetSetting('profile', $v); Push-UiApps }
+                Update-Tip
+            } catch { Write-Log ('profile switch failed: ' + $_.Exception.Message) }
+        })
+        [void]$pm.DropDownItems.Add($it)
+    }
+    [void]$menu.Items.Add($pm)
+
     $auto = New-Object System.Windows.Forms.ToolStripMenuItem 'Start with Windows'
     $auto.Checked = Test-Autostart
     $auto.add_Click({ try { Set-Autostart (-not (Test-Autostart)) } catch { Write-Log ('autostart failed: ' + $_.Exception.Message) } })
@@ -1110,9 +1250,10 @@ if ($Preview) {
     foreach ($round in 1..6) {
         $ui.SetApps([string[]]($demo | ForEach-Object { $_[0] }), [int[]]($demo | ForEach-Object { [int]($_[1] * (0.85 + 0.05 * $round)) }),
             [bool[]]($demo | ForEach-Object { $_[2] }), [bool[]]($demo | ForEach-Object { $_[3] }), [bool[]]($demo | ForEach-Object { $_[4] }),
-            [int[]]($demo | ForEach-Object { $_[5] }), [string[]]($demo | ForEach-Object { $_[6] }), [string[]]($demo | ForEach-Object { $_[7] }))
+            [int[]]($demo | ForEach-Object { $_[5] }), [string[]]($demo | ForEach-Object { $_[6] }), [string[]]($demo | ForEach-Object { $_[7] }),
+            [int[]]($demo | ForEach-Object { if ($_[3]) { [int](($_[1] * 7 + $round * 13) % 180) } else { 0 } }), [int[]]($demo | ForEach-Object { if ($_[3]) { [int](($_[1] * 3 + $round * 97) % 2400) } else { 0 } }))
     }
-    $ui.SetSuspects([string[]]@('GameBoostPro', 'WeatherWidgetPlus'), [string[]]@('GameBoost Pro (totally legit)', 'Weather Widget Plus'), [int[]]@(940, 455), [int[]]@(3, 1))
+    $ui.SetSuspects([string[]]@('GameBoostPro', 'WeatherWidgetPlus'), [string[]]@('GameBoost Pro (totally legit)', 'Weather Widget Plus'), [int[]]@(940, 455), [int[]]@(3, 1), [int[]]@(184, 12))
     $ui.SetStartup([string[]]@('hkcu-run|Steam', 'hkcu-run|Discord', 'hklm-run32|Adobe Creative Cloud', 'user-folder|Spotify.lnk', 'hkcu-run|GameBoostPro', 'hklm-run|SecurityHealth', 'hkcu-run|Teams', 'hkcu-run|OneDrive'),
         [string[]]@('Steam', 'Discord', 'Adobe Creative Cloud', 'Spotify.lnk', 'GameBoostPro', 'SecurityHealth', 'Teams', 'OneDrive'),
         [string[]]@('HKCU RuN', 'HKCU RuN', 'HKLM RuN (32)', 'STaRTuP FoLDeR', 'HKCU RuN', 'HKLM RuN', 'HKCU RuN', 'HKCU RuN'),
@@ -1210,6 +1351,11 @@ $script:OpenPoll.add_Tick({ if ($script:OpenEvent.WaitOne(0)) { Open-BonkWindow 
 $script:OpenPoll.Start()
 
 if ($Open) { Open-BonkWindow }
+
+# A crash while bonked must not strand the PC on the turbo power plan.
+if (-not @(Read-State).Count) { Restore-PowerPlan }
+# The CPU/disk sampler lives in the compiled UI assembly; load it now (cached after first run).
+try { Import-BonkUi } catch { Write-Log ('native helper unavailable: ' + $_.Exception.Message) }
 
 Write-Log 'tray started'
 try {
