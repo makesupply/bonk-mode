@@ -335,6 +335,14 @@ namespace BonkMode
             return ToPcm(b, 0.66f);
         }
 
+        public static short[] Alarm()
+        {
+            int half = (int)(R * 0.16);
+            float[] b = new float[half * 4];
+            for (int k = 0; k < 4; k++) Square(b, k * half, half, k % 2 == 0 ? 880 : 660, 0.5, 0.18, false);
+            return ToPcm(b, 0.45f);
+        }
+
         public static short[] Fanfare()
         {
             int[] notes = { 67, 72, 76, 79, 76, 79, 84 };
@@ -411,7 +419,8 @@ namespace BonkMode
     {
         public string Label, Names, Relaunch;
         public int MB, Procs, Hash, Number, Cpu10, IoKB;
-        public bool Enabled, Running, Jailed, Suspect;
+        public bool Enabled, Running, Jailed, Suspect, Solitary;
+        public int Escapes;
         public string Proc;
         public RectangleF Rect;
         public float Shake, Flash, Bars, ShownMB, Nervous;
@@ -463,6 +472,7 @@ namespace BonkMode
         public event Action GameCancelClicked;
         public event Action<string, string> SuspectAction;
         public event Action<string, bool> StartupToggle;
+        public event Action<string, bool> SolitaryToggled;
         public event Action StartupRefresh;
 
         public static bool NoAudio;
@@ -508,6 +518,7 @@ namespace BonkMode
             new[] { "powerPlan", "bool", "Turbo power plan", "Switch Windows to High performance while bonked; your old plan comes back on parole." },
             new[] { "radar", "bool", "Hog radar", "Flag heavy apps that are not on your list yet. Sweeps every 30 seconds." },
             new[] { "radarMB", "cycle:200,400,800,1500", "Radar threshold", "How much RAM an unlisted app needs before it becomes a suspect." },
+            new[] { "solitary", "bool", "Solitary confinement", "Jailed apps marked SOLO get shut straight back down if they restart themselves. If you open one yourself, it's paroled instead." },
             new[] { "hotkeys", "bool", "Global hotkeys", "Ctrl+Alt+B bonks, Ctrl+Alt+P paroles, Ctrl+Alt+K opens this window. Works inside games." },
             new[] { "autostart", "bool", "Start with Windows", "Put the hammer in the tray at login." },
             new[] { "autoUpdate", "bool", "Check for updates", "Look for a new release on GitHub when this opens and every 6h." }
@@ -530,7 +541,7 @@ namespace BonkMode
         List<Hit> zones = new List<Hit>(), zonesNext = new List<Hit>();
 
         ChipAudio audio;
-        short[] sfxBonk, sfxClick, sfxBlip, sfxWhoosh, sfxParole, sfxSlam, sfxFanfare;
+        short[] sfxBonk, sfxClick, sfxBlip, sfxWhoosh, sfxParole, sfxSlam, sfxFanfare, sfxAlarm;
         Bitmap logo, overlay, frame, bricks, plasma;
         Font fSmall, fTiny, fName, fTileBig, fNfo, fNfoB, fBtn, fScroll, fBanner, fPop, fSub, fBig, fCount;
         StringFormat sfCenter, sfWrap, sfLeftMid;
@@ -615,11 +626,11 @@ namespace BonkMode
             settings["music"] = "True"; settings["volume"] = "60"; settings["sfx"] = "True"; settings["shake"] = "True";
             settings["scanlines"] = "True"; settings["hammer"] = "normal"; settings["polite"] = "4";
             settings["autostart"] = "False"; settings["autoUpdate"] = "True";
-            settings["gameMode"] = "ask"; settings["radar"] = "True"; settings["radarMB"] = "400"; settings["profile"] = "gaming"; settings["powerPlan"] = "False"; settings["hotkeys"] = "True";
+            settings["gameMode"] = "ask"; settings["radar"] = "True"; settings["radarMB"] = "400"; settings["profile"] = "gaming"; settings["powerPlan"] = "False"; settings["hotkeys"] = "True"; settings["solitary"] = "True";
 
             if (!NoAudio) { try { audio = new ChipAudio(); } catch { audio = null; } }
             sfxBonk = Synth.Bonk(); sfxClick = Synth.Click(); sfxBlip = Synth.Blip(); sfxWhoosh = Synth.Whoosh();
-            sfxParole = Synth.Parole(); sfxSlam = Synth.Slam(); sfxFanfare = Synth.Fanfare();
+            sfxParole = Synth.Parole(); sfxSlam = Synth.Slam(); sfxFanfare = Synth.Fanfare(); sfxAlarm = Synth.Alarm();
             ReadRam();
 
             timer.Interval = 30;
@@ -681,9 +692,9 @@ namespace BonkMode
 
         public void PreviewUpdate(string remote, string log) { FinishCheck(remote, log, null); }
 
-        public void SetApps(string[] labels, int[] mb, bool[] enabled, bool[] running, bool[] jailed, int[] procs, string[] names, string[] relaunch, int[] cpu10, int[] iokb)
+        public void SetApps(string[] labels, int[] mb, bool[] enabled, bool[] running, bool[] jailed, int[] procs, string[] names, string[] relaunch, int[] cpu10, int[] iokb, bool[] solitary, int[] escapes)
         {
-            if (hammerIdx >= 0) { pending = new object[] { labels, mb, enabled, running, jailed, procs, names, relaunch, cpu10, iokb }; return; }
+            if (hammerIdx >= 0) { pending = new object[] { labels, mb, enabled, running, jailed, procs, names, relaunch, cpu10, iokb, solitary, escapes }; return; }
             Dictionary<string, AppInfo> old = new Dictionary<string, AppInfo>();
             foreach (AppInfo x in apps) old[x.Label] = x;
             apps.Clear();
@@ -700,7 +711,9 @@ namespace BonkMode
                 a.MB = mb[i]; a.Enabled = enabled[i]; a.Running = running[i];
                 a.Jailed = jailed[i] && !running[i];
                 a.Procs = procs[i]; a.Names = names[i]; a.Relaunch = relaunch[i];
-                a.Cpu10 = cpu10[i]; a.IoKB = iokb[i];
+                a.Cpu10 = cpu10[i]; a.IoKB = iokb[i]; a.Solitary = solitary[i];
+                if (old.ContainsKey(labels[i]) && escapes[i] > a.Escapes) EscapeFoiled(a);
+                a.Escapes = escapes[i];
                 if (a.Running)
                 {
                     a.History.Add(a.MB); if (a.History.Count > 72) a.History.RemoveAt(0);
@@ -773,7 +786,8 @@ namespace BonkMode
                 }
                 m.BubbleT -= fdt; m.NextBubble -= fdt;
                 if (m.NextBubble <= 0) { m.Bubble = Bubbles[rnd.Next(Bubbles.Length)]; m.BubbleT = 2.4f; m.NextBubble = 5 + (float)rnd.NextDouble() * 9; }
-                if (m.BubbleT <= 0)
+                if (m.BubbleT <= 0 && m.App.Solitary) { m.X += (130 - m.X) * (float)Math.Min(1, dt * 2); }
+                else if (m.BubbleT <= 0)
                 {
                     m.X += m.Dir * m.Speed * fdt; m.Walk += fdt * 9;
                     if (m.X < 22) { m.X = 22; m.Dir = 1; }
@@ -812,7 +826,7 @@ namespace BonkMode
             if (pending != null)
             {
                 object[] p = pending; pending = null;
-                SetApps((string[])p[0], (int[])p[1], (bool[])p[2], (bool[])p[3], (bool[])p[4], (int[])p[5], (string[])p[6], (string[])p[7], (int[])p[8], (int[])p[9]);
+                SetApps((string[])p[0], (int[])p[1], (bool[])p[2], (bool[])p[3], (bool[])p[4], (int[])p[5], (string[])p[6], (string[])p[7], (int[])p[8], (int[])p[9], (bool[])p[10], (int[])p[11]);
             }
             else { SyncInmates(); LayoutHome(); }
         }
@@ -846,6 +860,17 @@ namespace BonkMode
             }
             if (fresh) { radarPing = 0; Play(sfxBlip); }
             if (hammerIdx < 0) LayoutHome();
+        }
+
+        void EscapeFoiled(AppInfo a)
+        {
+            Play(sfxAlarm);
+            if (shakeOn) shake = Math.Max(shake, 0.5f);
+            bannerText = a.Solitary ? "eSCaPe FoiLeD!" : "JaiLBReaK!";
+            bannerSub = Leet(a.Solitary ? a.Label + " tried to sneak out. back in the hole." : a.Label + " restarted itself. mark it solo to stop that.");
+            bannerT = 0;
+            Inmate m;
+            if (inmates.TryGetValue(a.Label, out m)) { m.Bubble = a.Solitary ? "BaCK iN THe HoLe..." : "i'M ouT!"; m.BubbleT = 3; }
         }
 
         AppInfo Find(string label)
@@ -1229,6 +1254,17 @@ namespace BonkMode
                 return;
             }
             if (id == "startup-refresh") { Play(sfxBlip); if (StartupRefresh != null) StartupRefresh(); return; }
+            if (id.StartsWith("solitary:"))
+            {
+                AppInfo a = Find(id.Substring(9));
+                if (a == null) return;
+                a.Solitary = !a.Solitary;
+                Play(a.Solitary ? sfxSlam : sfxClick);
+                if (a.Solitary && shakeOn) shake = 0.3f;
+                status = Leet(a.Solitary ? a.Label + " is in solitary. no more sneaking back." : a.Label + " is back in a normal cell.");
+                if (SolitaryToggled != null) SolitaryToggled(a.Label, a.Solitary);
+                return;
+            }
             if (id.StartsWith("startup:"))
             {
                 if (Busy) return;
@@ -1626,7 +1662,7 @@ namespace BonkMode
 
             if (a.Bars > 0) DrawBars(g, r, a.Bars);
 
-            string chip = jailed ? "JaiLeD" : target ? "TaRGeT" : "SaFe";
+            string chip = jailed ? (a.Solitary ? "SoLiTaRY" : "JaiLeD") : target ? "TaRGeT" : "SaFe";
             Color cc = jailed ? Color.FromArgb(170, 170, 185) : target ? Red : Green;
             SizeF cs = g.MeasureString(chip, fTiny);
             g.FillRectangle(B(cc), r.X + 5, r.Y + 5, cs.Width, 13);
@@ -1777,6 +1813,16 @@ namespace BonkMode
         {
             AppInfo a = m.App;
             g.DrawImage(bricks, cx, cy, cw, 120);
+            if (a.Solitary)
+            {
+                // the hole: lights almost out, one flickering bulb
+                g.FillRectangle(B(Color.FromArgb(232, 4, 2, 2)), cx, cy, cw, 120);
+                g.DrawString("S O L i T a R Y", fTiny, B(Color.FromArgb(120, 150, 20, 20)), new RectangleF(cx, cy + 62, cw, 14), sfCenter);
+                int glow = (int)(t * 7 + a.Hash) % 9 == 0 ? 40 : 110;
+                g.FillEllipse(B(Color.FromArgb(glow / 3, 255, 220, 120)), cx + cw / 2 - 30, cy + 2, 60, 50);
+                g.FillEllipse(B(Color.FromArgb(glow + 100, 255, 230, 140)), cx + cw / 2 - 4, cy + 8, 8, 8);
+                g.DrawLine(P(Color.FromArgb(80, 80, 80)), cx + cw / 2, cy, cx + cw / 2, cy + 8);
+            }
             g.FillRectangle(B(Color.FromArgb(40, 40, 46)), cx, cy + 104, cw, 16);
             // cot and bucket, for ambience
             g.FillRectangle(B(Color.FromArgb(90, 70, 50)), cx + 110, cy + 92, 52, 8);
@@ -1814,7 +1860,14 @@ namespace BonkMode
             g.DrawRectangle(P(Color.FromArgb(150, 70, 70)), cx, py, cw - 1, 73);
             g.DrawString("iNMaTe #" + a.Number, fTiny, B(Gold), cx + 5, py + 3);
             g.DrawString(a.Label, fName, Brushes.White, new RectangleF(cx + 5, py + 15, cw - 10, 28), sfWrap);
-            g.DrawString(Crimes[a.Hash % Crimes.Length], fTiny, B(Color.FromArgb(160, 160, 170)), new RectangleF(cx + 5, py + 42, cw - 10, 12), sfLeftMid);
+            if (a.Solitary) g.DrawString(Leet("solitary :: " + a.Escapes + " escape attempts"), fTiny, B(Red), new RectangleF(cx + 5, py + 42, cw - 10, 12), sfLeftMid);
+            else g.DrawString(Crimes[a.Hash % Crimes.Length], fTiny, B(Color.FromArgb(160, 160, 170)), new RectangleF(cx + 5, py + 42, cw - 10, 12), sfLeftMid);
+            RectangleF solo = new RectangleF(cx + cw - 46, py + 2, 42, 13);
+            bool soloHot = Hot("solitary:" + a.Label);
+            g.FillRectangle(B(a.Solitary ? Red : soloHot ? Color.FromArgb(90, 20, 20) : Color.FromArgb(30, 30, 36)), solo);
+            g.DrawString("SoLo", fTiny, B(a.Solitary ? Color.Black : Color.FromArgb(220, 120, 120)), solo, sfCenter);
+            RectangleF soloVis = RectangleF.Intersect(solo, area);
+            if (soloVis.Height > 4 && !m.Escaping) Zone(soloVis, "solitary:" + a.Label);
             RectangleF br = new RectangleF(cx + 30, py + 55, cw - 60, 16);
             bool can = !Busy && !m.Escaping;
             bool hot = can && Hot("paroleone:" + a.Label);
@@ -1990,6 +2043,7 @@ namespace BonkMode
             fy = Field(g, "STaTuS", stat, fx, fy, wText, s.Running ? Green : Color.Gray);
             fy = Field(g, "SeNTeNCe", sentence, fx, fy, wText, s.Enabled ? Red : Green);
             fy = Field(g, "RaM NoW", s.Running ? FormatSize(s.MB) : "0 MB", fx, fy, wText, Color.Yellow);
+            if (s.Jailed || s.Escapes > 0 || s.Solitary) fy = Field(g, "eSCaPe aTTeMPTS", s.Escapes + (s.Solitary ? "  ::  iN SoLiTaRY" : ""), fx, fy, wText, s.Solitary ? Red : Color.FromArgb(200, 210, 200));
             fy = Field(g, "CPU / DiSK", s.Running ? FormatCpu(s.Cpu10) + " oF YouR CPU  ::  " + FormatIo(s.IoKB) + " DiSK" : "-", fx, fy, wText, s.Cpu10 >= 80 ? Color.FromArgb(255, 150, 60) : Color.FromArgb(200, 210, 200));
             fy = Math.Max(fy, mug.Bottom + 6);
             fy = Field(g, "aLiaSeS", s.Names, fx, fy, panel.Width - 32, Color.FromArgb(200, 210, 200));
@@ -2023,9 +2077,10 @@ namespace BonkMode
 
             float by2 = panel.Bottom - 40;
             bool free = !Busy;
-            Button(g, new RectangleF(panel.X + 16, by2, 132, 28), s.Enabled ? "[ SPaRe iT ]" : "[ SeNTeNCe ]", "toggle:" + s.Label, Color.FromArgb(0, 40, 20), Green, free && !s.Jailed);
-            Button(g, new RectangleF(panel.X + 156, by2, 132, 28), "[ BoNK NoW ]", "bonkone:" + s.Label, Color.FromArgb(120, 0, 0), Color.Yellow, free && s.Running && !s.Jailed);
-            Button(g, new RectangleF(panel.X + 296, by2, 142, 28), "[ PaRoLe ]", "paroleone:" + s.Label, Color.FromArgb(0, 40, 20), Green, free && s.Jailed);
+            Button(g, new RectangleF(panel.X + 16, by2, 100, 28), s.Enabled ? "SPaRe" : "SeNTeNCe", "toggle:" + s.Label, Color.FromArgb(0, 40, 20), Green, free && !s.Jailed);
+            Button(g, new RectangleF(panel.X + 122, by2, 100, 28), "BoNK!", "bonkone:" + s.Label, Color.FromArgb(120, 0, 0), Color.Yellow, free && s.Running && !s.Jailed);
+            Button(g, new RectangleF(panel.X + 228, by2, 100, 28), "PaRoLe", "paroleone:" + s.Label, Color.FromArgb(0, 40, 20), Green, free && s.Jailed);
+            Button(g, new RectangleF(panel.X + 334, by2, 104, 28), s.Solitary ? "SoLo: oN" : "SoLo: oFF", "solitary:" + s.Label, s.Solitary ? Color.FromArgb(120, 0, 0) : Color.FromArgb(40, 10, 10), Color.FromArgb(255, 110, 110), true);
         }
 
         float Field(Graphics g, string key, string value, float x, float y, float w, Color c)
@@ -2183,7 +2238,7 @@ namespace BonkMode
             int n2 = achNames.Length, unlocked = 0;
             foreach (bool b in achOn) if (b) unlocked++;
             g.DrawString("aCHieVeMeNTS  " + unlocked + " / " + n2, fNfoB, B(Gold), 24, 478);
-            const int cols = 7;
+            const int cols = 8;
             float aw = (920 - (cols - 1) * 6) / (float)cols;
             for (int i = 0; i < n2; i++)
             {

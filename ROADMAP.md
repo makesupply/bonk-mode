@@ -17,11 +17,11 @@ This is the plan, not a promise. Order may change. Ideas welcome in [Issues](htt
 | v2.3.0 | Startup Jail | Stop apps from launching at login, fully reversible |
 | v2.4.0 | Profiles, CPU and disk | Gaming/streaming/work/battery profiles, CPU hogs, turbo power plan |
 | v2.5.0 | Hotkeys, Stream Deck and stats | Ctrl+Alt+B, remote control, Hall of Shame, achievements |
+| v2.6.0 | Solitary Confinement | Apps that restart themselves get thrown straight back in |
 
 ## 🔜 Next up
 
-### v2.6.0 · Solitary Confinement
-Apps that sneak back up after a bonk get thrown straight back in, and you'll see how many escape attempts they made.
+Everything on the original plan has shipped. Ideas for what comes next are welcome in Issues.
 
 ## 💭 Someday maybe
 - Digitally signed releases with a signature-checking updater

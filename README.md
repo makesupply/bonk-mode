@@ -84,7 +84,9 @@ The radar never suggests Windows itself, shared engines other apps run on (like 
 
 Every jailed app becomes a **striped inmate** with its initials on its shirt, pacing its cell. They grab the bars and yell things like *"I JUST WANTED TO SYNC!"* and *"CALL MY LAWYER!"* Each has an inmate number and a crime: *"opened a what's-new popup mid-raid"*, *"loitering in the system tray"*, *"resisting closure (X just minimizes)"*.
 
-Click **[PAROLE]** under one cell and that inmate's bars slide open and it sprints off screen. A warden hammer patrols the corridor. If the jail is empty, a tumbleweed rolls by.
+Click **[PAROLE]** under one cell and that inmate's bars slide open and it sprints off screen.
+
+**Solitary confinement:** some apps restart themselves after a bonk (watchdogs, updaters, helper services). Flip their cell to **SOLO** and they get shut straight back down within 3 seconds, with every escape attempt counted on their plate, a siren, and an **ESCAPE FOILED!** banner. Solitary cells are pitch dark with one flickering bulb. And if *you* open a jailed app yourself from the Start menu or taskbar, Bonk Mode sees that and paroles it instead of fighting you. A warden hammer patrols the corridor. If the jail is empty, a tumbleweed rolls by.
 
 ### 3 · DOSSIERS: the rap sheet
 
@@ -104,7 +106,7 @@ It flips Windows' own StartupApproved switch, the same one Task Manager's Startu
 
 ![Stats](screenshots/stats.png)
 
-Lifetime counters (apps bonked, RAM freed, bonk sessions, paroles), a **Hall of Shame** ranking your repeat offenders, and a before/after report of your free RAM for the last bonk. Plus **13 achievements**, from **FIRST BLOOD** to **THE BONKFATHER** (bonk 1,000 apps). Unlocking one gets you a banner and a fanfare. Some are secret until you earn them.
+Lifetime counters (apps bonked, RAM freed, bonk sessions, paroles), a **Hall of Shame** ranking your repeat offenders, and a before/after report of your free RAM for the last bonk. Plus **15 achievements**, from **FIRST BLOOD** to **THE BONKFATHER** (bonk 1,000 apps). Unlocking one gets you a banner and a fanfare. Some are secret until you earn them.
 
 ### 6 · SETTINGS
 
@@ -197,6 +199,7 @@ Everything is inside the app on screen **6**, and every change saves instantly.
 | Turbo power plan | Off by default. High performance while bonked, your own plan back on parole. A crash can't strand you on it. |
 | Hog radar | Flag heavy apps (RAM or 10%+ CPU) that aren't on your list. |
 | Radar threshold | 200, 400, 800 or 1500 MB before an app becomes a suspect. |
+| Solitary confinement | Jailed apps marked SOLO get shut back down if they restart themselves. |
 | Global hotkeys | Ctrl+Alt+B / P / K, working inside games. |
 | Start with Windows | Hammer in the tray at login. |
 | Check for updates | Looks for a new release on GitHub on open and every 6 hours. |
@@ -261,6 +264,10 @@ None of these close anything:
 ---
 
 ## 📜 Version history
+
+### v2.6.0 · Solitary Confinement
+- Mark a jailed app SOLO and it gets shut straight back down whenever it restarts itself, with escape attempts counted.
+- Opening a jailed app yourself paroles it instead. Dark solitary cells, a siren, two new achievements.
 
 ### v2.5.0 · Hotkeys, Stream Deck and stats
 - Global hotkeys (Ctrl+Alt+B / P / K) that work inside games.

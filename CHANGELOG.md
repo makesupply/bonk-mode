@@ -1,5 +1,14 @@
 # Bonk Mode changelog
 
+## v2.6.0 - Solitary Confinement
+- Some apps restart themselves after a bonk (watchdogs, updaters, helper services). Mark them SOLO and they get shut straight back down within 3 seconds, every time, with every escape attempt counted.
+- If you open a jailed app yourself (Start menu, taskbar, desktop), Bonk Mode sees Explorer started it and paroles it instead of fighting you.
+- Apps that break out without SOLO raise a JAILBREAK notice once, suggesting solitary.
+- Solitary cells in the cell block are pitch dark with one flickering bulb; the inmate sulks in the corner. Each plate shows its escape attempts. SOLO toggles on every cell and in the dossier.
+- A siren and an ESCAPE FOILED! banner when a breakout is caught.
+- Two new achievements: THE WARDEN and THE HOLE (foil 10 escapes). 15 in total.
+- Setting: Solitary confinement on/off.
+
 ## v2.5.0 - Hotkeys, Stream Deck and Stats
 - Global hotkeys that work inside games: Ctrl+Alt+B bonks, Ctrl+Alt+P paroles, Ctrl+Alt+K opens the keygen. Toggle them in Settings.
 - Remote control: bonk-mode.ps1 -Bonk, -Parole and -SetProfile <name> act on the running tray (and start it if needed). The installer adds BONK NOW and Parole shortcuts to the Start Menu, which make perfect Stream Deck buttons.

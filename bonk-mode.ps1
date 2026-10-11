@@ -57,7 +57,7 @@ $Version = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath 
 
 $DefaultSettings = [ordered]@{
     music = 'True'; volume = '60'; sfx = 'True'; shake = 'True'; scanlines = 'True'
-    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'; radar = 'True'; radarMB = '400'; profile = 'gaming'; powerPlan = 'False'; hotkeys = 'True'
+    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'; radar = 'True'; radarMB = '400'; profile = 'gaming'; powerPlan = 'False'; hotkeys = 'True'; solitary = 'True'
 }
 
 function Read-Settings {
@@ -632,11 +632,13 @@ $Achievements = @(
     @{ id = 'parole';  name = 'PaRoLe BoaRD';    desc = 'Grant parole 50 times.';                test = { param($s) $s.paroles -ge 50 } },
     @{ id = 'gamer';   name = 'GaMe oN';         desc = 'Let Auto Game Mode bonk for you.';      test = { param($s) $s.gameBonks -ge 1 } },
     @{ id = 'boot';    name = 'BooT CaMP';       desc = 'Jail an app from startup.';             test = { param($s) $s.startupJails -ge 1 } },
-    @{ id = 'sheriff'; name = 'SHeRiFF';         desc = 'Add a Hog Radar suspect to your list.'; test = { param($s) $s.radarAdds -ge 1 } }
+    @{ id = 'sheriff'; name = 'SHeRiFF';         desc = 'Add a Hog Radar suspect to your list.'; test = { param($s) $s.radarAdds -ge 1 } },
+    @{ id = 'warden';  name = 'THe WaRDeN';      desc = 'Put an app in solitary confinement.';   test = { param($s) $s.solitaryPuts -ge 1 } },
+    @{ id = 'hole';    name = 'THe HoLe';        desc = 'Foil 10 escape attempts.';              test = { param($s) $s.escapesFoiled -ge 10 } }
 )
 
 function Read-Stats {
-    $s = @{ apps = 0; bonks = 0; freedMB = 0; paroles = 0; bestMB = 0; night = $false; gameBonks = 0; startupJails = 0; radarAdds = 0
+    $s = @{ apps = 0; bonks = 0; freedMB = 0; paroles = 0; bestMB = 0; night = $false; gameBonks = 0; startupJails = 0; radarAdds = 0; solitaryPuts = 0; escapesFoiled = 0
             since = (Get-Date -Format 'yyyy-MM-dd'); perApp = @{}; unlocked = @(); last = $null }
     if (Test-Path -LiteralPath $StatsFile) {
         try {
@@ -669,6 +671,8 @@ function Add-Stats([string]$Kind, $Data) {
         'parole'  { $s.paroles += [int]$Data }
         'startup' { $s.startupJails++ }
         'radar'   { $s.radarAdds++ }
+        'solitary' { $s.solitaryPuts++ }
+        'escape'  { $s.escapesFoiled++ }
     }
     $new = @()
     foreach ($a in $Achievements) {
@@ -836,7 +840,8 @@ function Push-UiApps {
     $ui = $script:Ui
     if (-not $ui -or $ui.IsDisposed) { return }
     $rows = @(Get-Rows)
-    $jailed = @(Read-State | ForEach-Object { [string]$_.label })
+    $jailState = @(Read-State)
+    $jailed = @($jailState | ForEach-Object { [string]$_.label })
     # Running (biggest first), then jailed, then the sleeping rest.
     $show = @($rows | Where-Object { $_.Running } | Sort-Object MB -Descending) +
             @($rows | Where-Object { -not $_.Running -and $jailed -contains $_.Label }) +
@@ -857,7 +862,9 @@ function Push-UiApps {
         }),
         [string[]]@($show | ForEach-Object { Get-RelaunchSummary $_.Entry }),
         [int[]]@($show | ForEach-Object { [int]($_.CPU * 10) }),
-        [int[]]@($show | ForEach-Object { [int]$_.IOKB }))
+        [int[]]@($show | ForEach-Object { [int]$_.IOKB }),
+        [bool[]]@($show | ForEach-Object { [bool]$_.Entry.solitary }),
+        [int[]]@($show | ForEach-Object { $l = $_.Label; [int](@($jailState | Where-Object { $_.label -eq $l } | Select-Object -First 1).escapes) }))
 }
 
 function Push-UiSettings {
@@ -1065,6 +1072,78 @@ function Push-UiStartup {
         [int[]]@($items | ForEach-Object { $_.MB }), [bool[]]@($items | ForEach-Object { $_.Hive -eq 'HKLM' }))
 }
 
+# --- Solitary confinement -----------------------------------------------------
+# A jailed app that comes back on its own (watchdog, updater, service) is an
+# escape attempt. Apps marked solitary get shut straight back down. If YOU open
+# a jailed app (Explorer started it: Start menu, taskbar, desktop), that's a
+# voluntary parole instead, and it is left alone.
+
+$script:EscapeNotified = @{}
+$script:EscapedRunning = @{}
+
+function Test-UserLaunched($Procs) {
+    $ids = @($Procs | ForEach-Object { $_.Proc.Id })
+    if (-not $ids.Count) { return $false }
+    $filter = ($ids | ForEach-Object { "ProcessId=$_" }) -join ' OR '
+    $parents = @(Get-CimInstance Win32_Process -Filter $filter -ErrorAction SilentlyContinue | ForEach-Object { $_.ParentProcessId } | Select-Object -Unique)
+    foreach ($pp in $parents) {
+        $p = Get-Process -Id $pp -ErrorAction SilentlyContinue
+        if ($p -and $p.ProcessName -eq 'explorer') { return $true }
+    }
+    $false
+}
+
+function Set-Solitary([string]$Label, [bool]$On) {
+    $entry = @($script:Config.apps) | Where-Object { $_.label -eq $Label } | Select-Object -First 1
+    if (-not $entry) { return }
+    $entry | Add-Member -NotePropertyName solitary -NotePropertyValue $On -Force
+    Save-Config
+    Write-Log ('solitary {0}: {1}' -f $(if ($On) { 'on' } else { 'off' }), $Label)
+    if ($On) { try { Add-Stats 'solitary' } catch { } }
+}
+
+function Invoke-SolitaryTick {
+    if ($script:Settings.solitary -ne 'True' -or $script:Busy) { return }
+    $jail = @(Read-State)
+    if (-not $jail.Count) { return }
+    $rows = @(Get-Rows)
+    $keep = New-Object System.Collections.ArrayList
+    $changed = $false
+    foreach ($j in $jail) {
+        $row = $rows | Where-Object { $_.Label -eq $j.label } | Select-Object -First 1
+        if (-not $row -or -not $row.Running) { $script:EscapedRunning.Remove($j.label); [void]$keep.Add($j); continue }
+        if (-not $row.Entry.solitary -and $script:EscapedRunning.ContainsKey($j.label)) { [void]$keep.Add($j); continue }   # already counted this breakout
+        if (Test-UserLaunched $row.Procs) {
+            Write-Log ('voluntary parole: you opened {0}' -f $j.label)
+            $changed = $true
+            continue   # dropped from jail, left running
+        }
+        $escapes = 1 + [int]$j.escapes
+        $j | Add-Member -NotePropertyName escapes -NotePropertyValue $escapes -Force
+        [void]$keep.Add($j)
+        $changed = $true
+        if ($row.Entry.solitary) {
+            foreach ($r in $row.Procs) { try { $r.Proc.Kill() } catch { } }
+            Write-Log ('escape foiled: {0} (attempt {1})' -f $j.label, $escapes)
+            try { Add-Stats 'escape' } catch { }
+            if (-not $script:EscapeNotified.ContainsKey($j.label) -and -not $script:GameActive) {
+                Show-Balloon ('ESCAPE FOILED: {0}' -f $j.label) ('It tried to restart itself. Back to solitary. Escape attempts so far: {0}.' -f $escapes)
+            }
+        } else {
+            $script:EscapedRunning[$j.label] = $true
+            Write-Log ('jailbreak: {0} restarted itself' -f $j.label)
+            if (-not $script:EscapeNotified.ContainsKey($j.label) -and -not $script:GameActive) {
+                Show-Balloon ('JAILBREAK: {0}' -f $j.label) 'It restarted itself. Mark it SOLITARY in the Jail or Dossiers screen to keep it down.'
+            }
+        }
+        $script:EscapeNotified[$j.label] = $true
+    }
+    if ($changed) {
+        Save-State @($keep)
+        if ($script:Ui -and -not $script:Ui.IsDisposed) { Push-UiApps }
+    }
+}
+
 # --- Remote control: hotkeys and -Bonk / -Parole / -SetProfile from other launches ---
 
 $CmdFile = Join-Path $env:LOCALAPPDATA 'BonkMode\cmd.txt'
@@ -1139,6 +1218,7 @@ function New-BonkWindow {
     })
     $ui.add_EditClicked({ Start-Process notepad.exe -ArgumentList ('"{0}"' -f $ConfigFile) })
     $ui.add_GameCancelClicked({ Stop-GameCountdown })
+    $ui.add_SolitaryToggled({ param($label, $on) try { Set-Solitary $label $on; Push-UiApps } catch { Write-Log ('solitary toggle failed: ' + $_.Exception.Message) } })
     $ui.add_StartupRefresh({ try { Push-UiStartup; $script:Ui.SetStatus('startup list refreshed.') } catch { Write-Log ('startup refresh failed: ' + $_.Exception.Message) } })
     $ui.add_StartupToggle({
         param($key, $enable)
@@ -1391,7 +1471,8 @@ if ($Preview) {
         $ui.SetApps([string[]]($demo | ForEach-Object { $_[0] }), [int[]]($demo | ForEach-Object { [int]($_[1] * (0.85 + 0.05 * $round)) }),
             [bool[]]($demo | ForEach-Object { $_[2] }), [bool[]]($demo | ForEach-Object { $_[3] }), [bool[]]($demo | ForEach-Object { $_[4] }),
             [int[]]($demo | ForEach-Object { $_[5] }), [string[]]($demo | ForEach-Object { $_[6] }), [string[]]($demo | ForEach-Object { $_[7] }),
-            [int[]]($demo | ForEach-Object { if ($_[3]) { [int](($_[1] * 7 + $round * 13) % 180) } else { 0 } }), [int[]]($demo | ForEach-Object { if ($_[3]) { [int](($_[1] * 3 + $round * 97) % 2400) } else { 0 } }))
+            [int[]]($demo | ForEach-Object { if ($_[3]) { [int](($_[1] * 7 + $round * 13) % 180) } else { 0 } }), [int[]]($demo | ForEach-Object { if ($_[3]) { [int](($_[1] * 3 + $round * 97) % 2400) } else { 0 } }),
+            [bool[]]($demo | ForEach-Object { @('Adobe Creative Cloud', 'Zoom') -contains $_[0] }), [int[]]($demo | ForEach-Object { if ($_[0] -eq 'Zoom') { 7 } else { 0 } }))
     }
     $ui.SetSuspects([string[]]@('GameBoostPro', 'WeatherWidgetPlus'), [string[]]@('GameBoost Pro (totally legit)', 'Weather Widget Plus'), [int[]]@(940, 455), [int[]]@(3, 1), [int[]]@(184, 12))
     $ui.SetStartup([string[]]@('hkcu-run|Steam', 'hkcu-run|Discord', 'hklm-run32|Adobe Creative Cloud', 'user-folder|Spotify.lnk', 'hkcu-run|GameBoostPro', 'hklm-run|SecurityHealth', 'hkcu-run|Teams', 'hkcu-run|OneDrive'),
@@ -1427,7 +1508,7 @@ if ($Preview) {
         [string[]]@('137', '48.6 GB', '21', '19', '2026-10-10', '9830', '13420', '6', '3.9 GB', '2026-10-11 21:14'))
     $ui.SetShame([string[]]@('Adobe Creative Cloud', 'Microsoft Teams', 'OneDrive', 'Windows Widgets / Start feed', 'Microsoft Edge (background)', 'Slack'), [int[]]@(21, 19, 17, 12, 9, 4))
     $ui.SetAchievements([string[]]@($Achievements | ForEach-Object { $_.name }), [string[]]@($Achievements | ForEach-Object { $_.desc }),
-        [bool[]]@($Achievements | ForEach-Object { @('first', 'squad', 'hammer', 'gb10', 'repeat', 'gamer', 'boot', 'sheriff') -contains $_.id }))
+        [bool[]]@($Achievements | ForEach-Object { @('first', 'squad', 'hammer', 'gb10', 'repeat', 'gamer', 'boot', 'sheriff', 'warden') -contains $_.id }))
     $ui.ShowScreen(4); & $run 1.2; & $shoot 'stats'
     $ui.ShowScreen(5); & $run 0.5; & $shoot 'settings'
     $ui.ShowScreen(6); & $run 0.5; & $shoot 'updates'
@@ -1486,6 +1567,12 @@ $script:CountdownTimer.Interval = 500
 $script:CountdownTimer.add_Tick({ Invoke-CountdownTick })
 $script:CountdownTimer.Start()
 $script:NotifyIcon.add_BalloonTipClicked({ if ($script:PendingDue) { Stop-GameCountdown } else { Open-BonkWindow } })
+
+# Solitary confinement: check the jail for escapees every 3 seconds.
+$script:SolitaryTimer = New-Object System.Windows.Forms.Timer
+$script:SolitaryTimer.Interval = 3000
+$script:SolitaryTimer.add_Tick({ try { Invoke-SolitaryTick } catch { Write-Log ('solitary failed: ' + $_.Exception.Message) } })
+$script:SolitaryTimer.Start()
 
 # Hog Radar: first sweep after 20 seconds, then every 30.
 $script:RadarTimer = New-Object System.Windows.Forms.Timer
