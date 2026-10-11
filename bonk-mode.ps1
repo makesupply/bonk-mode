@@ -24,8 +24,11 @@
       -StartupList        list everything that launches at login and its jail state
     Other:
       -UpdateNow          install the latest release without the tray (no restart)
+    Remote control (for Stream Deck, shortcuts, scripts); starts the tray if needed:
+      -Bonk / -Parole     bonk or parole right now
+      -SetProfile <name>  switch to gaming, streaming, work or battery
 #>
-param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid, [switch]$GameScan, [string[]]$GameFolder, [switch]$UpdateNow, [switch]$Radar, [switch]$StartupList)
+param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid, [switch]$GameScan, [string[]]$GameFolder, [switch]$UpdateNow, [switch]$Radar, [switch]$StartupList, [switch]$Bonk, [switch]$Parole, [string]$SetProfile)
 
 $ErrorActionPreference = 'Stop'
 
@@ -54,7 +57,7 @@ $Version = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath 
 
 $DefaultSettings = [ordered]@{
     music = 'True'; volume = '60'; sfx = 'True'; shake = 'True'; scanlines = 'True'
-    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'; radar = 'True'; radarMB = '400'; profile = 'gaming'; powerPlan = 'False'
+    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'; radar = 'True'; radarMB = '400'; profile = 'gaming'; powerPlan = 'False'; hotkeys = 'True'
 }
 
 function Read-Settings {
@@ -341,6 +344,7 @@ function Add-Suspect([string]$Name, [string]$Label) {
     $script:Config.apps = @($script:Config.apps) + $entry
     Save-Config
     Write-Log ('radar: added {0} ({1}) to the list' -f $entry.label, $Name)
+    if (Get-Command Add-Stats -ErrorAction SilentlyContinue) { try { Add-Stats 'radar' } catch { } }
 }
 
 function Set-SpareForever([string]$Name) {
@@ -519,6 +523,7 @@ function Set-StartupItem([string]$Key, [bool]$Enable) {
         $p = Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -WindowStyle Hidden -EncodedCommand $enc" -WindowStyle Hidden -PassThru -Wait
         if ($p.ExitCode -ne 0) { throw "admin change was cancelled or failed" }
     }
+    if (-not $Enable -and (Get-Command Add-Stats -ErrorAction SilentlyContinue)) { try { Add-Stats 'startup' } catch { } }
     Write-Log ('startup {0}: {1} ({2})' -f $(if ($Enable) { 'paroled' } else { 'jailed' }), $item.Name, $item.Source)
 }
 
@@ -611,6 +616,88 @@ function Wait-Ui([int]$Ms) {
     }
 }
 
+# --- Lifetime stats and achievements (bonk-stats.json, never published) -----
+
+$StatsFile = Join-Path $AppDir 'bonk-stats.json'
+$Achievements = @(
+    @{ id = 'first';   name = 'FiRST BLooD';     desc = 'Bonk your first app.';                  test = { param($s) $s.apps -ge 1 } },
+    @{ id = 'squad';   name = 'BoNK SQuaD';      desc = 'Bonk 10 apps.';                         test = { param($s) $s.apps -ge 10 } },
+    @{ id = 'hammer';  name = 'HaMMeR TiMe';     desc = 'Bonk 100 apps.';                        test = { param($s) $s.apps -ge 100 } },
+    @{ id = 'father';  name = 'THe BoNKFaTHeR';  desc = 'Bonk 1,000 apps.';                      test = { param($s) $s.apps -ge 1000 } },
+    @{ id = 'gb10';    name = '10 GB CLuB';      desc = 'Free 10 GB of RAM in total.';           test = { param($s) $s.freedMB -ge 10240 } },
+    @{ id = 'gb100';   name = 'RaM BaRoN';       desc = 'Free 100 GB of RAM in total.';          test = { param($s) $s.freedMB -ge 102400 } },
+    @{ id = 'mega';    name = 'MeGa BoNK';       desc = 'Free 4 GB in a single bonk.';           test = { param($s) $s.bestMB -ge 4096 } },
+    @{ id = 'repeat';  name = 'RePeaT oFFeNDeR'; desc = 'Bonk the same app 10 times.';           test = { param($s) @($s.perApp.Values | Where-Object { $_ -ge 10 }).Count -gt 0 } },
+    @{ id = 'night';   name = 'NiGHT oWL';       desc = 'Bonk between midnight and 4 AM.';       test = { param($s) [bool]$s.night } },
+    @{ id = 'parole';  name = 'PaRoLe BoaRD';    desc = 'Grant parole 50 times.';                test = { param($s) $s.paroles -ge 50 } },
+    @{ id = 'gamer';   name = 'GaMe oN';         desc = 'Let Auto Game Mode bonk for you.';      test = { param($s) $s.gameBonks -ge 1 } },
+    @{ id = 'boot';    name = 'BooT CaMP';       desc = 'Jail an app from startup.';             test = { param($s) $s.startupJails -ge 1 } },
+    @{ id = 'sheriff'; name = 'SHeRiFF';         desc = 'Add a Hog Radar suspect to your list.'; test = { param($s) $s.radarAdds -ge 1 } }
+)
+
+function Read-Stats {
+    $s = @{ apps = 0; bonks = 0; freedMB = 0; paroles = 0; bestMB = 0; night = $false; gameBonks = 0; startupJails = 0; radarAdds = 0
+            since = (Get-Date -Format 'yyyy-MM-dd'); perApp = @{}; unlocked = @(); last = $null }
+    if (Test-Path -LiteralPath $StatsFile) {
+        try {
+            $j = Get-Content -LiteralPath $StatsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($p in $j.PSObject.Properties) {
+                if ($p.Name -eq 'perApp') { $h = @{}; foreach ($q in $p.Value.PSObject.Properties) { $h[$q.Name] = [int]$q.Value }; $s.perApp = $h }
+                elseif ($p.Name -eq 'unlocked') { $s.unlocked = @($p.Value | Where-Object { $_ }) }
+                else { $s[$p.Name] = $p.Value }
+            }
+        } catch { }
+    }
+    $s
+}
+
+function Get-FreeMB { try { [int][math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024) } catch { 0 } }
+
+function Add-Stats([string]$Kind, $Data) {
+    $s = Read-Stats
+    switch ($Kind) {
+        'bonk' {
+            $s.bonks++
+            $s.apps += @($Data.Labels).Count
+            $s.freedMB += [int]$Data.EstMB
+            if ([int]$Data.EstMB -gt [int]$s.bestMB) { $s.bestMB = [int]$Data.EstMB }
+            foreach ($l in $Data.Labels) { $s.perApp[$l] = 1 + [int]$s.perApp[$l] }
+            if ((Get-Date).Hour -lt 4) { $s.night = $true }
+            if ($Data.Game) { $s.gameBonks++ }
+            $s.last = @{ before = $Data.Before; after = $Data.After; apps = @($Data.Labels).Count; estMB = [int]$Data.EstMB; when = (Get-Date -Format 'yyyy-MM-dd HH:mm') }
+        }
+        'parole'  { $s.paroles += [int]$Data }
+        'startup' { $s.startupJails++ }
+        'radar'   { $s.radarAdds++ }
+    }
+    $new = @()
+    foreach ($a in $Achievements) {
+        if ($s.unlocked -notcontains $a.id -and (& $a.test $s)) { $s.unlocked = @($s.unlocked) + $a.id; $new += $a }
+    }
+    $s | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $StatsFile -Encoding UTF8
+    foreach ($a in $new) {
+        Write-Log ('achievement unlocked: {0}' -f $a.name)
+        if ($script:NotifyIcon) { Show-Balloon ('ACHIEVEMENT UNLOCKED: {0}' -f $a.name) $a.desc }
+        if ($script:Ui -and -not $script:Ui.IsDisposed) { $script:Ui.ShowAchievement($a.name) }
+    }
+    Push-UiStats
+}
+
+function Push-UiStats {
+    if (-not $script:Ui -or $script:Ui.IsDisposed) { return }
+    $s = Read-Stats
+    $last = $s.last
+    $script:Ui.SetStats(
+        [string[]]@('apps', 'freed', 'bonks', 'paroles', 'since', 'lastBefore', 'lastAfter', 'lastApps', 'lastEst', 'lastWhen'),
+        [string[]]@(('{0:N0}' -f [int]$s.apps), (Format-Size $s.freedMB), ('{0:N0}' -f [int]$s.bonks), ('{0:N0}' -f [int]$s.paroles), [string]$s.since,
+            $(if ($last) { [string]$last.before } else { '' }), $(if ($last) { [string]$last.after } else { '' }),
+            $(if ($last) { [string]$last.apps } else { '' }), $(if ($last) { Format-Size $last.estMB } else { '' }), $(if ($last) { [string]$last.when } else { '' })))
+    $top = @($s.perApp.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 8)
+    $script:Ui.SetShame([string[]]@($top | ForEach-Object { $_.Key }), [int[]]@($top | ForEach-Object { [int]$_.Value }))
+    $script:Ui.SetAchievements([string[]]@($Achievements | ForEach-Object { $_.name }), [string[]]@($Achievements | ForEach-Object { $_.desc }),
+        [bool[]]@($Achievements | ForEach-Object { $s.unlocked -contains $_.id }))
+}
+
 # Both return a status message; -Quiet skips the tray balloon (the window shows it instead).
 # $script:Busy stops game mode and timers from starting a second bonk mid-bonk.
 $script:Busy = $false
@@ -637,6 +724,7 @@ function Invoke-BonkCore([switch]$Quiet, [string]$Only) {
     Set-Tip 'Bonk Mode: BONKING...'
     Write-Log ('BONK: ' + (($targets | ForEach-Object { $_.Label }) -join ', '))
 
+    $freeBefore = Get-FreeMB
     $jailed = [System.Collections.ArrayList]@(Read-State)
     $all = @()
     $mb = 0
@@ -663,6 +751,13 @@ function Invoke-BonkCore([switch]$Quiet, [string]$Only) {
     $dodgers = @($all | Where-Object { try { $_.Proc.Refresh(); -not $_.Proc.HasExited } catch { $false } } |
         ForEach-Object { $_.Label } | Select-Object -Unique)
     Save-State $jailed
+    $freeAfter = Get-FreeMB
+    $hitLabels = @($targets | ForEach-Object { $_.Label } | Where-Object { $dodgers -notcontains $_ })
+    $hitMB = 0; foreach ($x in $targets) { if ($dodgers -notcontains $x.Label) { $hitMB += $x.MB } }
+    if ($hitLabels.Count) {
+        try { Add-Stats 'bonk' @{ Labels = $hitLabels; EstMB = $hitMB; Before = $freeBefore; After = $freeAfter; Game = [bool]$script:GameBonking } }
+        catch { Write-Log ('stats failed: ' + $_.Exception.Message) }
+    }
 
     $msg = '{0} apps sent to RAM jail. About {1} freed. Go get ''em.' -f ($targets.Count - $dodgers.Count), (Format-Size $mb)
     if ($dodgers.Count) {
@@ -703,6 +798,7 @@ function Invoke-ReleaseCore([switch]$Quiet, [string]$Only, [string[]]$Labels) {
     Save-State $keep
     if (-not @(Read-State).Count) { Restore-PowerPlan }
     Write-Log ('RELEASE: ' + ($back -join ', '))
+    if ($back.Count) { try { Add-Stats 'parole' $back.Count } catch { Write-Log ('stats failed: ' + $_.Exception.Message) } }
     $msg = if ($back.Count) { 'Parole granted: ' + ($back -join ', ') + '.' } else { 'Everyone was already out.' }
     if ($stay.Count) { $msg += ' Comes back on its own or when you open it: ' + ($stay -join ', ') + '.' }
     if (-not $Quiet) { Show-Balloon 'Released from RAM jail' $msg }
@@ -844,7 +940,7 @@ function Test-UpdateQuiet {
         $remote = $wc.DownloadString($RawBase + 'VERSION?t=' + [DateTime]::UtcNow.Ticks).Trim()
         if ([version]$remote -gt [version]$Version -and $script:NotifiedVersion -ne $remote) {
             $script:NotifiedVersion = $remote
-            Show-Balloon "Bonk Mode v$remote is out" 'Double-click the hammer and open UPDATES (key 6) to install it.'
+            Show-Balloon "Bonk Mode v$remote is out" 'Double-click the hammer and open UPDATES (key 7) to install it.'
         }
     } catch { }
 }
@@ -871,7 +967,8 @@ function Update-UiGame {
 function Start-GameBonk {
     $script:PendingDue = $null
     $before = @(Read-State | ForEach-Object { [string]$_.label })
-    $msg = Invoke-Bonk -Quiet
+    $script:GameBonking = $true
+    try { $msg = Invoke-Bonk -Quiet } finally { $script:GameBonking = $false }
     $after = @(Read-State | ForEach-Object { [string]$_.label })
     $script:AutoBonked = @($after | Where-Object { $before -notcontains $_ })
     Write-Log ('game mode bonk for {0}: {1} [jailed by game mode: {2}]' -f $script:GameName, $msg, ($script:AutoBonked -join ', '))
@@ -968,7 +1065,48 @@ function Push-UiStartup {
         [int[]]@($items | ForEach-Object { $_.MB }), [bool[]]@($items | ForEach-Object { $_.Hive -eq 'HKLM' }))
 }
 
-function New-BonkWindow {    Import-BonkUi
+# --- Remote control: hotkeys and -Bonk / -Parole / -SetProfile from other launches ---
+
+$CmdFile = Join-Path $env:LOCALAPPDATA 'BonkMode\cmd.txt'
+$script:Hotkeys = $null
+
+function Invoke-TrayCommand([string]$Command) {
+    try {
+        switch -Regex ($Command) {
+            '^bonk$'        { if (-not $script:Busy) { Invoke-Bonk | Out-Null; if ($script:Ui -and -not $script:Ui.IsDisposed) { Push-UiApps } } }
+            '^parole$'      { if (-not $script:Busy) { Invoke-Release | Out-Null; if ($script:Ui -and -not $script:Ui.IsDisposed) { Push-UiApps } } }
+            '^profile:(.+)$' {
+                Switch-Profile $Matches[1]
+                Show-Balloon ('Profile: {0}' -f $Matches[1]) 'Your checkboxes switched with it.'
+                if ($script:Ui -and -not $script:Ui.IsDisposed) { $script:Ui.SetSetting('profile', $Matches[1]); Push-UiApps }
+            }
+            default         { Open-BonkWindow }
+        }
+    } catch { Write-Log ('command {0} failed: {1}' -f $Command, $_.Exception.Message) }
+}
+
+function Read-TrayCommand {
+    if (-not (Test-Path -LiteralPath $CmdFile)) { return 'open' }
+    $cmd = (Get-Content -LiteralPath $CmdFile -Raw).Trim()
+    [System.IO.File]::Delete($CmdFile)
+    if ($cmd) { $cmd } else { 'open' }
+}
+
+function Set-Hotkeys([bool]$On) {
+    if ($script:Hotkeys) { $script:Hotkeys.Dispose(); $script:Hotkeys = $null }
+    if (-not $On) { return }
+    try { Import-BonkUi } catch { Write-Log ('hotkeys unavailable: ' + $_.Exception.Message); return }
+    $script:Hotkeys = New-Object BonkMode.HotkeyWindow
+    $ok = @()
+    foreach ($k in @(@(1, 0x42, 'Ctrl+Alt+B'), @(2, 0x50, 'Ctrl+Alt+P'), @(3, 0x4B, 'Ctrl+Alt+K'))) {
+        if ($script:Hotkeys.Register($k[0], 3, $k[1])) { $ok += $k[2] } else { Write-Log ('hotkey {0} is taken by another app' -f $k[2]) }
+    }
+    $script:Hotkeys.add_Pressed({ param($id) switch ($id) { 1 { Invoke-TrayCommand 'bonk' } 2 { Invoke-TrayCommand 'parole' } 3 { Invoke-TrayCommand 'open' } } })
+    Write-Log ('hotkeys: ' + ($ok -join ', '))
+}
+
+function New-BonkWindow {
+    Import-BonkUi
     $ui = New-Object BonkMode.KeygenForm
     if ($script:NotifyIcon) { $ui.Icon = $script:NotifyIcon.Icon }
     $ui.SetVersion($Version, $RawBase, $RepoUrl)
@@ -995,6 +1133,7 @@ function New-BonkWindow {    Import-BonkUi
             }
             else { $script:Settings[$key] = $value; Save-Settings }
             if ($key -eq 'powerPlan' -and $value -ne 'True') { Restore-PowerPlan }
+            if ($key -eq 'hotkeys') { Set-Hotkeys ($value -eq 'True') }
             if ($key -eq 'gameMode') { if ($value -eq 'off') { $script:PendingDue = $null }; Update-UiGame }
         } catch { Write-Log ('setting failed: ' + $_.Exception.Message) }
     })
@@ -1039,6 +1178,7 @@ function Open-BonkWindow {
         Push-UiApps
         Push-UiSuspects
         Push-UiStartup
+        Push-UiStats
         Update-UiGame
         $ui.Show()
         $ui.Activate()
@@ -1283,11 +1423,17 @@ if ($Preview) {
     $ui.ShowScreen(1); & $run 4.2; & $shoot 'cellblock'
     $ui.ShowScreen(2); & $run 0.5; & $shoot 'dossier'
     $ui.ShowScreen(3); & $run 1.0; & $shoot 'startup'
-    $ui.ShowScreen(4); & $run 0.5; & $shoot 'settings'
-    $ui.ShowScreen(5); & $run 0.5; & $shoot 'updates'
+    $ui.SetStats([string[]]@('apps', 'freed', 'bonks', 'paroles', 'since', 'lastBefore', 'lastAfter', 'lastApps', 'lastEst', 'lastWhen'),
+        [string[]]@('137', '48.6 GB', '21', '19', '2026-10-10', '9830', '13420', '6', '3.9 GB', '2026-10-11 21:14'))
+    $ui.SetShame([string[]]@('Adobe Creative Cloud', 'Microsoft Teams', 'OneDrive', 'Windows Widgets / Start feed', 'Microsoft Edge (background)', 'Slack'), [int[]]@(21, 19, 17, 12, 9, 4))
+    $ui.SetAchievements([string[]]@($Achievements | ForEach-Object { $_.name }), [string[]]@($Achievements | ForEach-Object { $_.desc }),
+        [bool[]]@($Achievements | ForEach-Object { @('first', 'squad', 'hammer', 'gb10', 'repeat', 'gamer', 'boot', 'sheriff') -contains $_.id }))
+    $ui.ShowScreen(4); & $run 1.2; & $shoot 'stats'
+    $ui.ShowScreen(5); & $run 0.5; & $shoot 'settings'
+    $ui.ShowScreen(6); & $run 0.5; & $shoot 'updates'
     $ui.SetUpdateProgress(62, 'Patching bytes...'); & $run 0.4; & $shoot 'patching'
     $ui.SetUpdateProgress(-1, '')
-    $ui.ShowScreen(6); & $run 1.3; & $shoot 'greetz'
+    $ui.ShowScreen(7); & $run 1.3; & $shoot 'greetz'
     $ui.Dispose()
     return
 }
@@ -1297,6 +1443,8 @@ if ($Preview) {
 $createdNew = $false
 $script:Mutex = New-Object System.Threading.Mutex($true, $MutexName, [ref]$createdNew)
 if (-not $createdNew) {
+    $cmd = if ($Bonk) { 'bonk' } elseif ($Parole) { 'parole' } elseif ($SetProfile) { 'profile:' + $SetProfile.ToLower() } else { 'open' }
+    try { [void][System.IO.Directory]::CreateDirectory((Split-Path $CmdFile)); Set-Content -LiteralPath $CmdFile -Value $cmd -Encoding ASCII } catch { }
     try { [void][System.Threading.EventWaitHandle]::OpenExisting($OpenEventName).Set() }
     catch { [System.Windows.Forms.MessageBox]::Show('Bonk Mode is already in your tray. Look for the hammer.', 'Bonk Mode') | Out-Null }
     return
@@ -1347,10 +1495,12 @@ $script:RadarTimer.Start()
 
 $script:OpenPoll = New-Object System.Windows.Forms.Timer
 $script:OpenPoll.Interval = 300
-$script:OpenPoll.add_Tick({ if ($script:OpenEvent.WaitOne(0)) { Open-BonkWindow } })
+$script:OpenPoll.add_Tick({ if ($script:OpenEvent.WaitOne(0)) { Invoke-TrayCommand (Read-TrayCommand) } })
 $script:OpenPoll.Start()
 
+Set-Hotkeys ($script:Settings.hotkeys -eq 'True')
 if ($Open) { Open-BonkWindow }
+if ($Bonk) { Invoke-TrayCommand 'bonk' } elseif ($Parole) { Invoke-TrayCommand 'parole' } elseif ($SetProfile) { Invoke-TrayCommand ('profile:' + $SetProfile.ToLower()) }
 
 # A crash while bonked must not strand the PC on the turbo power plan.
 if (-not @(Read-State).Count) { Restore-PowerPlan }

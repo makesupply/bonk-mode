@@ -1,5 +1,12 @@
 # Bonk Mode changelog
 
+## v2.5.0 - Hotkeys, Stream Deck and Stats
+- Global hotkeys that work inside games: Ctrl+Alt+B bonks, Ctrl+Alt+P paroles, Ctrl+Alt+K opens the keygen. Toggle them in Settings.
+- Remote control: bonk-mode.ps1 -Bonk, -Parole and -SetProfile <name> act on the running tray (and start it if needed). The installer adds BONK NOW and Parole shortcuts to the Start Menu, which make perfect Stream Deck buttons.
+- New STATS screen (key 5): apps bonked, RAM freed, bonk sessions and paroles, a Hall of Shame of repeat offenders, and a before/after report of your free RAM for the last bonk.
+- 13 achievements to unlock, from FIRST BLOOD to THE BONKFATHER. Unlocking one pops a banner and a fanfare.
+- Stats live in bonk-stats.json on your PC and survive updates.
+
 ## v2.4.0 - Profiles, CPU and Disk
 - Profiles: gaming, streaming, work and battery. Each remembers its own checkboxes. The first visit seeds sensible defaults: streaming spares Discord, OBS and Spotify; work spares Teams, Slack, Zoom and your browsers and sentences game launchers; battery sentences nearly everything. Switch from the purple PROFILE button on Home, Settings, or the tray menu.
 - Every card now shows CPU (as a share of your whole machine) and disk activity. Anything burning more than 8% of the CPU gets a flashing CPU HOG badge.

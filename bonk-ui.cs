@@ -377,6 +377,34 @@ namespace BonkMode
             }
         }
     }
+    // Global hotkeys (Ctrl+Alt+B / P / K) for the tray, without needing a visible window.
+    public class HotkeyWindow : NativeWindow, IDisposable
+    {
+        [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr h, int id, int mods, int vk);
+        [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h, int id);
+        public event Action<int> Pressed;
+        readonly List<int> ids = new List<int>();
+
+        public HotkeyWindow() { CreateHandle(new CreateParams()); }
+
+        // mods: 1 Alt, 2 Ctrl, 4 Shift; 0x4000 = no auto-repeat
+        public bool Register(int id, int mods, int vk)
+        {
+            bool ok = RegisterHotKey(Handle, id, mods | 0x4000, vk);
+            if (ok) ids.Add(id);
+            return ok;
+        }
+
+        public void UnregisterAll() { foreach (int id in ids) UnregisterHotKey(Handle, id); ids.Clear(); }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x0312 && Pressed != null) Pressed(m.WParam.ToInt32());
+            base.WndProc(ref m);
+        }
+
+        public void Dispose() { UnregisterAll(); DestroyHandle(); }
+    }
     // ================================================================== model
 
     public class AppInfo
@@ -452,8 +480,8 @@ namespace BonkMode
         static readonly Color DimGreen = Color.FromArgb(0, 110, 55);
         static readonly Color Red = Color.FromArgb(255, 60, 60);
         static readonly Color Gold = Color.FromArgb(255, 210, 0);
-        static readonly string[] TabNames = { "HoMe", "JaiL", "DoSSieRS", "STaRTuP", "SeTTiNGS", "uPDaTeS", "GReeTZ" };
-        const int ScrHome = 0, ScrJail = 1, ScrDossier = 2, ScrStartup = 3, ScrSettings = 4, ScrUpdates = 5, ScrGreetz = 6;
+        static readonly string[] TabNames = { "HoMe", "JaiL", "DoSSieRS", "STaRTuP", "STaTS", "SeTTiNGS", "uPDaTeS", "GReeTZ" };
+        const int ScrHome = 0, ScrJail = 1, ScrDossier = 2, ScrStartup = 3, ScrStats = 4, ScrSettings = 5, ScrUpdates = 6, ScrGreetz = 7;
         static readonly string[] PopWords = { "BoNK!", "WHaM!", "SMaSH!", "BoNK!", "K.O.!", "ByE!", "BoNK!", "PoW!", "CLaNK!" };
         static readonly string[] Bubbles = {
             "LeT Me ouT!", "i JuST WaNTeD To SYNC!", "1 MoRe uPDaTe...", "i KNoW MY RiGHTS!", "CaLL MY LaWYeR!",
@@ -480,6 +508,7 @@ namespace BonkMode
             new[] { "powerPlan", "bool", "Turbo power plan", "Switch Windows to High performance while bonked; your old plan comes back on parole." },
             new[] { "radar", "bool", "Hog radar", "Flag heavy apps that are not on your list yet. Sweeps every 30 seconds." },
             new[] { "radarMB", "cycle:200,400,800,1500", "Radar threshold", "How much RAM an unlisted app needs before it becomes a suspect." },
+            new[] { "hotkeys", "bool", "Global hotkeys", "Ctrl+Alt+B bonks, Ctrl+Alt+P paroles, Ctrl+Alt+K opens this window. Works inside games." },
             new[] { "autostart", "bool", "Start with Windows", "Put the hammer in the tray at login." },
             new[] { "autoUpdate", "bool", "Check for updates", "Look for a new release on GitHub when this opens and every 6h." }
         };
@@ -503,7 +532,7 @@ namespace BonkMode
         ChipAudio audio;
         short[] sfxBonk, sfxClick, sfxBlip, sfxWhoosh, sfxParole, sfxSlam, sfxFanfare;
         Bitmap logo, overlay, frame, bricks, plasma;
-        Font fSmall, fTiny, fName, fTileBig, fNfo, fNfoB, fBtn, fScroll, fBanner, fPop, fSub, fBig;
+        Font fSmall, fTiny, fName, fTileBig, fNfo, fNfoB, fBtn, fScroll, fBanner, fPop, fSub, fBig, fCount;
         StringFormat sfCenter, sfWrap, sfLeftMid;
 
         int screen;
@@ -561,6 +590,7 @@ namespace BonkMode
             fPop = new Font("Consolas", 11f, FontStyle.Bold);
             fSub = new Font("Consolas", 9f);
             fBig = new Font("Consolas", 14f, FontStyle.Bold);
+            fCount = new Font("Consolas", 24f, FontStyle.Bold);
             sfCenter = new StringFormat(); sfCenter.Alignment = StringAlignment.Center; sfCenter.LineAlignment = StringAlignment.Center;
             sfWrap = new StringFormat(); sfWrap.Trimming = StringTrimming.EllipsisWord;
             sfLeftMid = new StringFormat(); sfLeftMid.LineAlignment = StringAlignment.Center; sfLeftMid.Trimming = StringTrimming.EllipsisCharacter; sfLeftMid.FormatFlags = StringFormatFlags.NoWrap;
@@ -577,7 +607,7 @@ namespace BonkMode
                 "VISIT THE CELL BLOCK AND GRANT PAROLE ONE INMATE AT A TIME ...   THE UPDATER PULLS FRESH CRACKS STRAIGHT FROM GITHUB ...   " +
                 "STEAM, YOUR GPU DRIVER AND WINDOWS HAVE DIPLOMATIC IMMUNITY ...   " +
                 "GREETZ FLY OUT TO RAZOR 1911, FAIRLIGHT, RELOADED, CODEX, SKIDROW, SND, CPY AND EVERY KEYGEN MUSICIAN WHO MADE A 40KB TRACKER FILE SLAP ...   " +
-                "NO GREETZ TO ADOBE CREATIVE CLOUD, YOU KNOW WHAT YOU DID ...   BONK MODE IS OPEN SOURCE UNDER APACHE 2.0, FORKS MUST CREDIT GITHUB.COM/MAKESUPPLY/BONK-MODE ...   [1-7] SCREENS  [B] BONK  [P] PAROLE  [M] MUSIC  [ESC] EXIT ...   ";
+                "NO GREETZ TO ADOBE CREATIVE CLOUD, YOU KNOW WHAT YOU DID ...   BONK MODE IS OPEN SOURCE UNDER APACHE 2.0, FORKS MUST CREDIT GITHUB.COM/MAKESUPPLY/BONK-MODE ...   [1-8] SCREENS  [B] BONK  CTRL+ALT+B BONKS FROM INSIDE A GAME  [P] PAROLE  [M] MUSIC  [ESC] EXIT ...   ";
             using (Graphics g = CreateGraphics())
                 charW = g.MeasureString("MMMMMMMMMM", fScroll, PointF.Empty, StringFormat.GenericTypographic).Width / 10f;
             scrollX = W;
@@ -585,7 +615,7 @@ namespace BonkMode
             settings["music"] = "True"; settings["volume"] = "60"; settings["sfx"] = "True"; settings["shake"] = "True";
             settings["scanlines"] = "True"; settings["hammer"] = "normal"; settings["polite"] = "4";
             settings["autostart"] = "False"; settings["autoUpdate"] = "True";
-            settings["gameMode"] = "ask"; settings["radar"] = "True"; settings["radarMB"] = "400"; settings["profile"] = "gaming"; settings["powerPlan"] = "False";
+            settings["gameMode"] = "ask"; settings["radar"] = "True"; settings["radarMB"] = "400"; settings["profile"] = "gaming"; settings["powerPlan"] = "False"; settings["hotkeys"] = "True";
 
             if (!NoAudio) { try { audio = new ChipAudio(); } catch { audio = null; } }
             sfxBonk = Synth.Bonk(); sfxClick = Synth.Click(); sfxBlip = Synth.Blip(); sfxWhoosh = Synth.Whoosh();
@@ -1249,7 +1279,7 @@ namespace BonkMode
                 timer.Dispose();
                 if (audio != null) { audio.Dispose(); audio = null; }
                 foreach (Bitmap b in new[] { logo, overlay, frame, bricks, plasma }) if (b != null) b.Dispose();
-                foreach (Font f in new[] { fSmall, fTiny, fName, fTileBig, fNfo, fNfoB, fBtn, fScroll, fBanner, fPop, fSub, fBig }) if (f != null) f.Dispose();
+                foreach (Font f in new[] { fSmall, fTiny, fName, fTileBig, fNfo, fNfoB, fBtn, fScroll, fBanner, fPop, fSub, fBig, fCount }) if (f != null) f.Dispose();
                 foreach (SolidBrush br in brushes.Values) br.Dispose();
                 foreach (Pen p in pens.Values) p.Dispose();
                 brushes.Clear(); pens.Clear();
@@ -1310,6 +1340,7 @@ namespace BonkMode
                     case ScrJail: DrawJail(g); break;
                     case ScrDossier: DrawDossier(g); break;
                     case ScrStartup: DrawStartup(g); break;
+                    case ScrStats: DrawStats(g); break;
                     case ScrSettings: DrawSettings(g); break;
                     case ScrUpdates: DrawUpdates(g); break;
                     default: DrawGreetz(g); break;
@@ -2071,6 +2102,132 @@ namespace BonkMode
             Button(g, new RectangleF(20, BtnY, 200, 32), "[ ReFReSH ]", "startup-refresh", Color.FromArgb(0, 40, 20), Green, !Busy);
             g.DrawString(Leet("nothing is deleted. a jailed app just stops launching at login; parole flips it back. admin items ask windows first."), fSmall, B(Color.Gray), new RectangleF(232, BtnY + 2, W - 252, 30), sfWrap);
         }
+        // ------------------------------------------------------------ screen: stats
+
+        readonly Dictionary<string, string> stats = new Dictionary<string, string>();
+        string[] shameLabels = new string[0];
+        int[] shameCounts = new int[0];
+        string[] achNames = new string[0], achDescs = new string[0];
+        bool[] achOn = new bool[0];
+
+        public void SetStats(string[] keys, string[] values) { for (int i = 0; i < keys.Length; i++) stats[keys[i]] = values[i]; }
+        public void SetShame(string[] labels, int[] counts) { shameLabels = labels; shameCounts = counts; }
+        public void SetAchievements(string[] names, string[] descs, bool[] unlocked) { achNames = names; achDescs = descs; achOn = unlocked; }
+
+        public void ShowAchievement(string name)
+        {
+            bannerText = "uNLoCKeD!"; bannerSub = Leet("achievement: " + name); bannerT = 0;
+            if (shakeOn) shake = 0.4f;
+            Play(sfxFanfare);
+        }
+
+        string Stat(string k, string def) { string v; return stats.TryGetValue(k, out v) && !string.IsNullOrEmpty(v) ? v : def; }
+
+        void DrawStats(Graphics g)
+        {
+            string[] cap = { "aPPS BoNKeD", "RaM FReeD", "BoNK SeSSioNS", "PaRoLeS GRaNTeD" };
+            string[] val = { Stat("apps", "0"), Stat("freed", "0 MB"), Stat("bonks", "0"), Stat("paroles", "0") };
+            for (int i = 0; i < 4; i++)
+            {
+                RectangleF r = new RectangleF(20 + i * 232, 158, 224, 70);
+                g.FillRectangle(B(Color.FromArgb(210, 0, 0, 0)), r);
+                g.DrawRectangle(P(i == 1 ? Gold : DimGreen), r.X, r.Y, r.Width - 1, r.Height - 1);
+                g.DrawString(cap[i], fTiny, B(Color.FromArgb(150, 170, 150)), new RectangleF(r.X, r.Y + 6, r.Width, 12), sfCenter);
+                float bob = (float)Math.Sin(t * 3 + i) * 2;
+                g.DrawString(val[i], fCount, B(i == 1 ? Gold : Hsv(t * 40 + i * 70, 0.6, 1)), new RectangleF(r.X, r.Y + 20 + bob, r.Width, 40), sfCenter);
+            }
+            g.DrawString(Leet("ram freed is what the bonked apps were using. counting since ") + Stat("since", Leet("today")), fTiny, B(Color.Gray), new RectangleF(20, 230, W - 40, 12), sfCenter);
+
+            // hall of shame
+            Rectangle shame = new Rectangle(20, 252, 452, 218);
+            Box(g, shame, "HaLL oF SHaMe");
+            int max = 1; foreach (int n in shameCounts) max = Math.Max(max, n);
+            if (shameLabels.Length == 0) g.DrawString(Leet("no repeat offenders yet. go bonk something."), fNfo, B(Color.Gray), new RectangleF(shame.X, shame.Y, shame.Width, shame.Height), sfCenter);
+            for (int i = 0; i < shameLabels.Length && i < 8; i++)
+            {
+                float y = shame.Y + 14 + i * 25;
+                string medal = i == 0 ? "#1" : i == 1 ? "#2" : i == 2 ? "#3" : "  ";
+                g.DrawString(medal, fNfoB, B(i == 0 ? Gold : i == 1 ? Color.Silver : Color.FromArgb(205, 127, 50)), shame.X + 10, y);
+                g.DrawString(shameLabels[i], fNfo, B(Color.White), new RectangleF(shame.X + 36, y, 190, 16), sfLeftMid);
+                float bw = 170f * shameCounts[i] / max * (float)Math.Min(1, openT * 1.5);
+                g.FillRectangle(B(Color.FromArgb(150, 0, 0)), shame.X + 232, y + 3, bw, 12);
+                g.FillRectangle(B(Red), shame.X + 232, y + 3, bw, 3);
+                g.DrawString("x" + shameCounts[i], fNfoB, B(Red), shame.X + 236 + bw, y);
+            }
+
+            // last bonk report
+            Rectangle rep = new Rectangle(486, 252, 454, 218);
+            Box(g, rep, "LaST BoNK RePoRT");
+            double before, after;
+            bool hasRep = double.TryParse(Stat("lastBefore", ""), NumberStyles.Float, Inv, out before) & double.TryParse(Stat("lastAfter", ""), NumberStyles.Float, Inv, out after);
+            if (!hasRep) g.DrawString(Leet("bonk something and the before/after shows up here."), fNfo, B(Color.Gray), new RectangleF(rep.X, rep.Y, rep.Width, rep.Height), sfCenter);
+            else
+            {
+                double top = Math.Max(1, ramTotalGB * 1024);
+                float bx = rep.X + 110, bwMax = rep.Width - 130;
+                g.DrawString(Leet("free before"), fNfo, B(Color.Gray), rep.X + 16, rep.Y + 26);
+                g.FillRectangle(B(Color.FromArgb(60, 60, 70)), bx, rep.Y + 26, (float)(bwMax * before / top), 16);
+                g.DrawString(FormatSize((float)before), fTiny, B(Color.White), bx + 4, rep.Y + 28);
+                g.DrawString(Leet("free after"), fNfo, B(Color.Gray), rep.X + 16, rep.Y + 54);
+                float grow = (float)Math.Min(1, openT * 1.2);
+                g.FillRectangle(B(Green), bx, rep.Y + 54, (float)(bwMax * (before + (after - before) * grow) / top), 16);
+                g.DrawString(FormatSize((float)after), fTiny, B(Color.Black), bx + 4, rep.Y + 56);
+                double gained = after - before;
+                g.DrawString((gained >= 0 ? "+" : "") + FormatSize((float)gained) + Leet(" measured"), fBig, B(gained >= 0 ? Green : Color.Yellow), new RectangleF(rep.X, rep.Y + 84, rep.Width, 26), sfCenter);
+                g.DrawString(Leet(Stat("lastApps", "?") + " apps bonked, about " + Stat("lastEst", "?") + " of ram they were holding"), fNfo, B(Color.FromArgb(200, 210, 200)), new RectangleF(rep.X, rep.Y + 116, rep.Width, 16), sfCenter);
+                g.DrawString(Stat("lastWhen", ""), fTiny, B(Color.Gray), new RectangleF(rep.X, rep.Y + 136, rep.Width, 12), sfCenter);
+                g.DrawString(Leet("windows refills free ram with cache over time; the measured number is a snapshot, not a promise."), fTiny, B(Color.FromArgb(110, 120, 110)), new RectangleF(rep.X + 14, rep.Y + 160, rep.Width - 28, 40), sfWrap);
+            }
+
+            // achievements
+            int n2 = achNames.Length, unlocked = 0;
+            foreach (bool b in achOn) if (b) unlocked++;
+            g.DrawString("aCHieVeMeNTS  " + unlocked + " / " + n2, fNfoB, B(Gold), 24, 478);
+            const int cols = 7;
+            float aw = (920 - (cols - 1) * 6) / (float)cols;
+            for (int i = 0; i < n2; i++)
+            {
+                RectangleF r = new RectangleF(20 + (i % cols) * (aw + 6), 496 + (i / cols) * 58, aw, 52);
+                bool on = achOn[i];
+                string id = "ach:" + i;
+                g.FillRectangle(B(on ? Color.FromArgb(230, 40, 32, 0) : Color.FromArgb(220, 14, 14, 16)), r);
+                g.DrawRectangle(P(on ? ((int)(t * 2 + i) % 3 == 0 ? Color.White : Gold) : Color.FromArgb(70, 70, 80)), r.X, r.Y, r.Width - 1, r.Height - 1);
+                if (on) DrawTrophy(g, r.X + 16, r.Y + 26, (float)Math.Sin(t * 4 + i) * 2);
+                else DrawLock(g, r.X + 16, r.Y + 26);
+                g.DrawString(achNames[i], fTiny, B(on ? Gold : Color.FromArgb(120, 120, 130)), new RectangleF(r.X + 32, r.Y + 6, r.Width - 34, 14), sfLeftMid);
+                g.DrawString(on ? achDescs[i] : "???", fTiny, B(on ? Color.FromArgb(210, 210, 190) : Color.FromArgb(90, 90, 100)), new RectangleF(r.X + 32, r.Y + 20, r.Width - 34, 30), sfWrap);
+                Zone(r, id);
+            }
+            string hov = (hoverId != null && hoverId.StartsWith("ach:")) ? hoverId.Substring(4) : null;
+            int hi;
+            string tip = hov != null && int.TryParse(hov, out hi) && hi < n2 ? "> " + achNames[hi] + ": " + achDescs[hi] + (achOn[hi] ? "  (UNLOCKED)" : "  (LOCKED)") : Leet("> hover an achievement to read how to get it.");
+            g.DrawString(tip, fSmall, B(Color.Yellow), new RectangleF(24, BtnY + 8, W - 48, 16), sfLeftMid);
+        }
+
+        void DrawTrophy(Graphics g, float cx, float cy, float bob)
+        {
+            GraphicsState st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            cy += bob;
+            g.DrawArc(P(Gold), cx - 12, cy - 12, 8, 9, 90, 180);
+            g.DrawArc(P(Gold), cx + 4, cy - 12, 8, 9, 270, 180);
+            g.FillPie(B(Gold), cx - 8, cy - 18, 16, 18, 0, 180);
+            g.FillRectangle(B(Gold), cx - 8, cy - 10, 16, 2);
+            g.FillRectangle(B(Gold), cx - 1.5f, cy - 1, 3, 6);
+            g.FillRectangle(B(Gold), cx - 6, cy + 5, 12, 3);
+            g.FillEllipse(B(Color.White), cx - 4, cy - 7, 3, 3);
+            g.Restore(st);
+        }
+
+        void DrawLock(Graphics g, float cx, float cy)
+        {
+            GraphicsState st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen p = new Pen(Color.FromArgb(100, 100, 110), 2)) g.DrawArc(p, cx - 5, cy - 14, 10, 12, 180, 180);
+            g.FillRectangle(B(Color.FromArgb(100, 100, 110)), cx - 7, cy - 8, 14, 12);
+            g.FillRectangle(B(Color.Black), cx - 1, cy - 4, 2, 4);
+            g.Restore(st);
+        }
         void DrawSettings(Graphics g)
         {
             Rectangle box = new Rectangle(20, 162, W - 40, 448);
@@ -2246,7 +2403,7 @@ namespace BonkMode
                 "    aPPS THaT MiNiMiZe WHeN You HiT X",
                 "",
                 "  KeYS:",
-                "    [1-7] SCReeNS  [B] BoNK  [P] PaRoLe",
+                "    [1-8] SCReeNS  [B] BoNK  [P] PaRoLe",
                 "    [M] MuSiC  [eSC] eXiT  WHeeL SCRoLLS",
                 "",
                 "  oPeN SouRCe (aPaCHe-2.0):",

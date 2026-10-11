@@ -100,15 +100,21 @@ Every app that launches when you log in, from the registry Run keys and the Star
 
 It flips Windows' own StartupApproved switch, the same one Task Manager's Startup tab uses. Nothing is deleted, Task Manager shows the same state, and you can undo anything. Machine-wide entries ask Windows for admin permission first. Windows Security, audio drivers and Bonk Mode itself are immune, and you can make anything else immune with `startupImmune` in your `bonk-list.json`.
 
-### 5 · SETTINGS
+### 5 · STATS: the hall of shame
+
+![Stats](screenshots/stats.png)
+
+Lifetime counters (apps bonked, RAM freed, bonk sessions, paroles), a **Hall of Shame** ranking your repeat offenders, and a before/after report of your free RAM for the last bonk. Plus **13 achievements**, from **FIRST BLOOD** to **THE BONKFATHER** (bonk 1,000 apps). Unlocking one gets you a banner and a fanfare. Some are secret until you earn them.
+
+### 6 · SETTINGS
 
 ![Settings](screenshots/settings.png)
 
-### 6 · UPDATES: patch center
+### 7 · UPDATES: patch center
 
 ![Updates](screenshots/updates.png)
 
-### 7 · GREETZ
+### 8 · GREETZ
 
 ![Greetz](screenshots/greetz.png)
 
@@ -133,11 +139,26 @@ That adds **Bonk Mode** to your Start Menu, puts a 🔨 in your tray (check the 
 - **Double-click the hammer** (or the Start Menu shortcut) to open the keygen.
 - **Right-click the hammer** for the quick menu: bonk, parole, and checkboxes without opening anything.
 
+### Stream Deck and shortcuts
+
+The installer adds **Bonk Mode - BONK NOW** and **Bonk Mode - Parole** to your Start Menu. On a Stream Deck, add a **System > Open** button and point it at one of those shortcuts: one press clears the room. From scripts you can also run:
+
+```powershell
+.\bonk-mode.ps1 -Bonk
+.\bonk-mode.ps1 -Parole
+.\bonk-mode.ps1 -SetProfile streaming
+```
+
+They talk to the running tray, or start it if it isn't running.
+
 ### Keys
 
 | Key | Does |
 |---|---|
-| `1`-`7` | Switch screens |
+| `1`-`8` | Switch screens |
+| `Ctrl+Alt+B` | BONK from anywhere, even inside a game |
+| `Ctrl+Alt+P` | Parole from anywhere |
+| `Ctrl+Alt+K` | Open the keygen |
 | `B` | BONK 'EM ALL |
 | `P` | Parole everyone |
 | `M` | Music on/off |
@@ -160,7 +181,7 @@ Bonk Mode will not bonk the launcher your game runs on, and it will not bonk Win
 
 ## ⚙️ Settings
 
-Everything is inside the app on screen **5**, and every change saves instantly.
+Everything is inside the app on screen **6**, and every change saves instantly.
 
 | Setting | What it does |
 |---|---|
@@ -176,6 +197,7 @@ Everything is inside the app on screen **5**, and every change saves instantly.
 | Turbo power plan | Off by default. High performance while bonked, your own plan back on parole. A crash can't strand you on it. |
 | Hog radar | Flag heavy apps (RAM or 10%+ CPU) that aren't on your list. |
 | Radar threshold | 200, 400, 800 or 1500 MB before an app becomes a suspect. |
+| Global hotkeys | Ctrl+Alt+B / P / K, working inside games. |
 | Start with Windows | Hammer in the tray at login. |
 | Check for updates | Looks for a new release on GitHub on open and every 6 hours. |
 
@@ -200,7 +222,7 @@ The starter list only sentences the obvious freeloaders: cloud sync, work chat, 
 
 ## 🔄 Live updates
 
-Screen **6** is the patch center. It checks this repo, shows you the changelog, and when there's a new version you click **[INSTALL]**, watch a very official-looking hex dump scroll by, and Bonk Mode restarts itself on the new version.
+Screen **7** is the patch center. It checks this repo, shows you the changelog, and when there's a new version you click **[INSTALL]**, watch a very official-looking hex dump scroll by, and Bonk Mode restarts itself on the new version.
 
 ![Patching](screenshots/patching.png)
 
@@ -239,6 +261,11 @@ None of these close anything:
 ---
 
 ## 📜 Version history
+
+### v2.5.0 · Hotkeys, Stream Deck and stats
+- Global hotkeys (Ctrl+Alt+B / P / K) that work inside games.
+- -Bonk, -Parole and -SetProfile remote control, plus BONK NOW and Parole shortcuts for Stream Deck.
+- Stats screen with Hall of Shame, before/after RAM report and 13 achievements.
 
 ### v2.4.0 · Profiles, CPU and disk
 - Gaming, streaming, work and battery profiles that remember their own checkboxes.
