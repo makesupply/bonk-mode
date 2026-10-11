@@ -1,5 +1,10 @@
 {
   "_readme": "Bonk Mode kill list. enabled=true means BONK 'EM ALL closes it. names = process names (no .exe). paths = wildcard match on the exe path. relaunch: omit = reopen the same exe, null = don't reopen (Windows/the app brings it back itself), or a list of {file,args}. Toggle entries from the tray menu; edit here for anything else. Protected processes (Steam, Explorer, GPU driver, security, PowerShell, Python, Windows core) are never touched no matter what this file says.",
+  "games": {
+    "_readme": "Auto Game Mode already watches Steam libraries, Epic, Xbox, EA, Ubisoft and GOG folders. Add other game folders or exe names (no .exe) here.",
+    "names": [],
+    "folders": []
+  },
   "apps": [
     { "label": "OneDrive", "enabled": true, "names": ["OneDrive"],
       "relaunch": [ { "file": "%LOCALAPPDATA%\\Microsoft\\OneDrive\\OneDrive.exe", "args": "/background" } ] },

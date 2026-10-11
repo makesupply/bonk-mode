@@ -392,6 +392,7 @@ namespace BonkMode
         public event Action<string> BonkOneClicked;
         public event Action<string> ParoleOneClicked;
         public event Action<string, string> SettingChanged;
+        public event Action GameCancelClicked;
 
         public static bool NoAudio;
 
@@ -430,6 +431,7 @@ namespace BonkMode
             new[] { "scanlines", "bool", "CRT scanlines", "For that 1999 monitor glow." },
             new[] { "hammer", "cycle:fast,normal,dramatic", "Hammer speed", "How long each swing takes. Dramatic is very dramatic." },
             new[] { "polite", "cycle:2,4,8", "Polite warning", "Seconds apps get to close nicely before the hammer falls." },
+            new[] { "gameMode", "cycle:off,ask,auto", "Auto game mode", "Bonk when a game starts, parole when it quits. Ask = 5 second countdown you can cancel." },
             new[] { "autostart", "bool", "Start with Windows", "Put the hammer in the tray at login." },
             new[] { "autoUpdate", "bool", "Check for updates", "Look for a new release on GitHub when this opens and every 6h." }
         };
@@ -483,6 +485,8 @@ namespace BonkMode
         DateTime lastCheck = DateTime.MinValue;
         int updPct = -1;
         string updMsg = "";
+        string gameStatus = "aSK :: WaTCHiNG";
+        int settingsScroll;
 
         public KeygenForm()
         {
@@ -562,6 +566,15 @@ namespace BonkMode
         }
 
         public void SetUpdateProgress(int pct, string msg) { updPct = pct; updMsg = Leet(msg ?? ""); }
+
+        public void SetGameStatus(string s) { gameStatus = s ?? ""; }
+
+        public void ShowGameBanner(string game)
+        {
+            bannerText = "GaMe oN!"; bannerSub = Leet(game + " detected. clearing the room."); bannerT = 0;
+            if (shakeOn) shake = 0.6f;
+            Play(sfxFanfare);
+        }
 
         public void ShowScreen(int s) { screen = Math.Max(0, Math.Min(5, s)); transT = 0; }
 
@@ -1013,6 +1026,7 @@ namespace BonkMode
             else if (screen == 1) jailScroll += d;
             else if (screen == 2 && e.X < 480) appsScroll += d / 2;
             else if (screen == 4) logScroll += d / 2;
+            else if (screen == 3) settingsScroll += d;
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -1066,6 +1080,7 @@ namespace BonkMode
                 }
                 return;
             }
+            if (id == "gamecancel") { Play(sfxClick); if (GameCancelClicked != null) GameCancelClicked(); return; }
             if (id == "upd:check") { StartUpdateCheck(true); return; }
             if (id == "upd:install")
             {
@@ -1131,7 +1146,8 @@ namespace BonkMode
             return p;
         }
 
-        void Zone(RectangleF r, string id) { zonesNext.Add(new Hit(r, id)); }
+        bool zonesOff;
+        void Zone(RectangleF r, string id) { if (!zonesOff) zonesNext.Add(new Hit(r, id)); }
         bool Hot(string id) { return hoverId == id; }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -1346,7 +1362,7 @@ namespace BonkMode
             string[] right = {
                 Dots("SYSTeM RaM", RamBar() + " " + ramLoad + "%"),
                 Dots("FRee RaM", ramFreeGB.ToString("0.0", Inv) + " / " + ramTotalGB.ToString("0", Inv) + " GB"),
-                Dots("VeRSioN", "v" + localVersion + (updAvailable ? "  >> v" + remoteVersion + " ouT!" : ""))
+                Dots("GaMe MoDe", gameStatus)
             };
             int budget = (int)((openT - 0.15) * 170);
             for (int i = 0; i < 3; i++)
@@ -1356,6 +1372,8 @@ namespace BonkMode
             }
             string cursor = ((int)(t * 3) % 2 == 0) ? "_" : " ";
             TypeLine(g, "=> STaTuS: " + status + cursor, Color.Yellow, 34, box.Y + 58, budget);
+            if (gameStatus.StartsWith("BoNKiNG iN"))
+                Button(g, new RectangleF(box.Right - 120, box.Y + 39, 104, 18), "CaNCeL", "gamecancel", Color.FromArgb(120, 0, 0), Color.Yellow, true);
 
             Rectangle area = new Rectangle(20, GridTop, W - 40, GridBottom - GridTop);
             int maxScroll = Math.Max(0, (int)homeContentH - area.Height);
@@ -1792,11 +1810,17 @@ namespace BonkMode
         {
             Rectangle box = new Rectangle(20, 162, W - 40, 448);
             Box(g, box, "SeTTiNGS");
+            int top = box.Y + 10, bottom = box.Bottom - 8;
+            float contentH = SettingRows.Length * 47;
+            settingsScroll = Clamp(settingsScroll, 0, Math.Max(0, (int)contentH - (bottom - top)));
+            g.SetClip(new Rectangle(box.X + 4, top, box.Width - 8, bottom - top));
             for (int i = 0; i < SettingRows.Length; i++)
             {
                 string[] row = SettingRows[i];
                 string key = row[0], kind = row[1];
-                float y = box.Y + 14 + i * 47;
+                float y = box.Y + 14 + i * 47 - settingsScroll;
+                if (y + 44 < top || y - 4 > bottom) continue;
+                zonesOff = y - 4 < top || y + 40 > bottom;   // half-visible rows are not clickable
                 if (i % 2 == 0) g.FillRectangle(B(Color.FromArgb(14, 0, 255, 120)), box.X + 8, y - 4, box.Width - 16, 44);
                 g.DrawString(Leet(row[2]), fBtn, B(Color.White), box.X + 22, y);
                 g.DrawString(Leet(row[3]), fSmall, B(Color.FromArgb(150, 165, 150)), box.X + 22, y + 19);
@@ -1833,6 +1857,9 @@ namespace BonkMode
                     Button(g, new RectangleF(cx + 234, y + 2, 36, 28), ">", "set:" + key + ":next", Color.Black, Green, true);
                 }
             }
+            zonesOff = false;
+            g.ResetClip();
+            Scrollbar(g, box.Right - 8, top, bottom, contentH, settingsScroll);
             g.DrawString(Leet("every change saves instantly. nothing in here can bonk steam."), fSmall, B(Color.Gray), new RectangleF(20, BtnY + 8, W - 40, 16), sfCenter);
         }
 

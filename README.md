@@ -58,6 +58,14 @@ Then the banner tells you how much you freed. Very satisfying. Scientifically pr
 
 <sub>*not scientifically proven</sub>
 
+### AUTO GAME MODE: it bonks for you
+
+![Game mode](screenshots/gamemode.png)
+
+Start a game and Bonk Mode notices: **GAME ON!** It counts down five seconds (click the notification or **CANCEL** if you want everything left open), then clears the room. Quit the game, and ten seconds later everything it bonked comes back on parole. You never have to remember.
+
+It watches every Steam library on your PC (read straight from Steam), plus Epic, Xbox, EA, Ubisoft and GOG folders. Got a game somewhere else? Add its folder or exe name to the `games` block in your `bonk-list.json`. The game you're playing is never bonked, even if it's on your list. Set it to **off**, **ask** (default) or **auto** in Settings or the tray menu.
+
 ### 2 · CELL BLOCK: visit the inmates
 
 ![Cell block](screenshots/cellblock.png)
@@ -143,6 +151,7 @@ Everything is inside the app on screen **4**, and every change saves instantly.
 | CRT scanlines | For that 1999 monitor glow. |
 | Hammer speed | Fast, normal, or **dramatic**. Dramatic is very dramatic. |
 | Polite warning | 2, 4 or 8 seconds for apps to close nicely before the hammer. |
+| Auto game mode | **Off**, **ask** (5 second countdown you can cancel) or **auto**. |
 | Start with Windows | Hammer in the tray at login. |
 | Check for updates | Looks for a new release on GitHub on open and every 6 hours. |
 
@@ -198,11 +207,17 @@ None of these close anything:
 .\bonk-mode.ps1 -ListOnly          # table of your list, what's running, RAM per app
 .\bonk-mode.ps1 -SelfTest          # builds the tray menu and prints what parole would reopen
 .\bonk-mode.ps1 -Preview .\shots   # renders every keygen screen to PNG (uses demo apps)
+.\bonk-mode.ps1 -GameScan          # which game folders are watched, and is a game running now
 ```
 
 ---
 
 ## 📜 Version history
+
+### v2.1.0 · Auto Game Mode
+- Bonks automatically when a game starts (5 second countdown you can cancel, or fully auto) and paroles when it quits.
+- Watches all Steam libraries plus Epic, Xbox, EA, Ubisoft, GOG and your own folders. Never bonks the game itself.
+- Fixed: parole now reopens apps with a single relaunch command.
 
 ### v2.0.1 · Credit Where Credit Is Due
 - Relicensed to **Apache 2.0 + NOTICE**: forks and derivatives must credit the original.

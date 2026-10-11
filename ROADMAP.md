@@ -12,11 +12,9 @@ This is the plan, not a promise. Order may change. Ideas welcome in [Issues](htt
 | v1.1.0 | The Keygen | 1999 keygen window, chiptune, hammer animation |
 | v2.0.0 | The Cell Block Update | Six screens, inmates, dossiers, settings, live updater |
 | v2.0.1 | Credit Where Credit Is Due | Apache 2.0 + NOTICE |
+| v2.1.0 | Auto Game Mode | Bonks when a game starts, paroles when it quits |
 
 ## 🔜 Next up
-
-### v2.1.0 · Auto Game Mode
-Start a game and Bonk Mode notices, counts down "bonking in 3...", and clears the room. Quit the game and everyone gets paroled automatically. You'll never have to remember again.
 
 ### v2.2.0 · Hog Radar
 A new app starts eating gigabytes? **NEW SUSPECT DETECTED.** One click adds it to your list, or spares it forever. The list maintains itself.
@@ -30,10 +28,8 @@ Gaming, Streaming (keeps Discord and OBS), Work and Battery profiles. CPU and di
 ### v2.5.0 · Hotkeys, Stream Deck and stats
 `Ctrl+Alt+B` to bonk from inside a game. Command-line switches for Stream Deck buttons. Lifetime stats, achievements, and a hall of shame for repeat offenders.
 
-### v3.0.0 · Signed and verified
-Digitally signed releases, and an updater that refuses anything not signed by us.
-
 ## 💭 Someday maybe
+- Digitally signed releases with a signature-checking updater
 - A community "known hogs" list
 - Bonk on idle or on a schedule
 - Spanish translation

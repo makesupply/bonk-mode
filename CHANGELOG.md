@@ -1,5 +1,15 @@
 # Bonk Mode changelog
 
+## v2.1.0 - Auto Game Mode
+- Start a game and Bonk Mode notices. It counts down 5 seconds (click the notification or CANCEL to stop it), then bonks your list. Quit the game and everything it bonked gets paroled 10 seconds later.
+- Watches Steam libraries (all of them, read from Steam's own library list), Epic, Xbox, EA, Ubisoft and GOG folders, plus any folders or exe names you add to the new games block in bonk-list.json.
+- The game you're playing is never bonked, even if it is on your list.
+- Auto game mode setting: off, ask (default) or auto. Also in the tray menu.
+- GAME ON! banner and a live game-mode line in the release info box.
+- Settings screen scrolls now. More settings are coming.
+- New: -GameScan shows the watched folders and any game running now. -UpdateNow installs the latest release from the command line.
+- Fixed: parole now reopens apps that have a single relaunch command, and single-app parole works again.
+
 ## v2.0.1 - Credit Where Credit Is Due
 - Relicensed from MIT to Apache License 2.0 with a NOTICE file. Forks and derivatives must keep the attribution: "Based on Bonk Mode by makesupply".
 - License headers in the source files, and credit on the Greetz screen and in the scroller.

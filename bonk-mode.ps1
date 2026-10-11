@@ -19,8 +19,11 @@
       -ListOnly           print the bonk list and what is running
       -SelfTest           build the tray menu and print it
       -Preview <dir>      render keygen window frames to PNG files
+      -GameScan           show game folders and any game running right now
+    Other:
+      -UpdateNow          install the latest release without the tray (no restart)
 #>
-param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid)
+param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid, [switch]$GameScan, [string[]]$GameFolder, [switch]$UpdateNow)
 
 $ErrorActionPreference = 'Stop'
 
@@ -49,7 +52,7 @@ $Version = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath 
 
 $DefaultSettings = [ordered]@{
     music = 'True'; volume = '60'; sfx = 'True'; shake = 'True'; scanlines = 'True'
-    hammer = 'normal'; polite = '4'; autoUpdate = 'True'
+    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'
 }
 
 function Read-Settings {
@@ -127,6 +130,7 @@ function Get-Snapshot {
     foreach ($p in Get-Process) {
         if ($p.SessionId -ne $session -or $p.Id -eq $PID) { continue }
         if ($Protected -contains $p.ProcessName) { continue }
+        if ($script:GamePids.ContainsKey($p.Id)) { continue }   # never bonk the game you are playing
         $key = '{0}:{1}' -f $p.Id, $p.ProcessName
         $seen[$key] = $true
         if ($script:PathCache.ContainsKey($key)) { $path = $script:PathCache[$key] }
@@ -191,10 +195,85 @@ function Resolve-Relaunch($Entry, $Procs) {
 }
 
 # ---------------------------------------------------------------------------
+# Auto Game Mode: spot games by where they live (Steam libraries, Epic, Xbox,
+# your own folders) or by exe name from the "games" block in bonk-list.json.
+# ---------------------------------------------------------------------------
+
+# Crash handlers, installers, anti-cheat and launchers inside game folders are not "the game".
+$GameExclude = '(?i)crash|report|redist|setup|install|unins|anticheat|battleye|webhelper|prereq|dxsetup|vc_?redist|cefprocess|launcher|updater|helper'
+$script:GameRoots = $null
+$script:GameRootsAt = [datetime]::MinValue
+$script:SeenPids = @{}
+$script:GamePids = @{}
+
+function Get-GameRoots {
+    $roots = New-Object System.Collections.ArrayList
+    $steam = $null
+    try { $steam = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction Stop).SteamPath } catch { }
+    if (-not $steam) { $steam = Join-Path ${env:ProgramFiles(x86)} 'Steam' }
+    $steam = $steam -replace '/', '\'
+    $libs = @($steam)
+    $vdf = Join-Path $steam 'steamapps\libraryfolders.vdf'
+    if (Test-Path -LiteralPath $vdf) {
+        foreach ($m in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw), '"path"\s+"([^"]+)"')) { $libs += ($m.Groups[1].Value -replace '\\\\', '\') }
+    }
+    foreach ($l in ($libs | Select-Object -Unique)) {
+        $common = Join-Path $l 'steamapps\common'
+        if (Test-Path -LiteralPath $common) { [void]$roots.Add($common.TrimEnd('\') + '\') }
+    }
+    $known = @((Join-Path $env:ProgramFiles 'Epic Games'), 'C:\XboxGames', (Join-Path $env:ProgramFiles 'EA Games'),
+               (Join-Path ${env:ProgramFiles(x86)} 'Ubisoft\Ubisoft Game Launcher\games'), (Join-Path ${env:ProgramFiles(x86)} 'GOG Galaxy\Games'))
+    foreach ($d in $known) { if ($d -and (Test-Path -LiteralPath $d)) { [void]$roots.Add($d.TrimEnd('\') + '\') } }
+    foreach ($d in @($script:Config.games.folders)) {
+        if ($d) { [void]$roots.Add(([Environment]::ExpandEnvironmentVariables($d)).TrimEnd('\') + '\') }
+    }
+    foreach ($d in @($GameFolder)) { if ($d) { [void]$roots.Add($d.TrimEnd('\') + '\') } }
+    $seen = @{}
+    foreach ($r in $roots) { if (-not $seen.ContainsKey($r)) { $seen[$r] = $true; $r } }
+}
+
+# Returns the names of games that started since the last call. Paths are only read
+# for processes never seen before, so a quiet machine costs one Get-Process per tick.
+function Find-NewGames {
+    if (-not $script:GameRoots -or ((Get-Date) - $script:GameRootsAt).TotalMinutes -gt 10) {
+        $script:GameRoots = @(Get-GameRoots); $script:GameRootsAt = Get-Date
+    }
+    $names = @(@($script:Config.games.names) | Where-Object { $_ })
+    $session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+    $alive = @{}
+    $found = New-Object System.Collections.ArrayList
+    foreach ($p in Get-Process) {
+        $alive[$p.Id] = $true
+        if ($script:GamePids.ContainsKey($p.Id) -or $script:SeenPids.ContainsKey($p.Id)) { continue }
+        $script:SeenPids[$p.Id] = $true
+        if ($p.SessionId -ne $session -or $Protected -contains $p.ProcessName) { continue }
+        $isGame = $names -contains $p.ProcessName
+        if (-not $isGame -and $p.ProcessName -notmatch $GameExclude) {
+            $path = $null
+            try { $path = $p.Path } catch { }
+            if ($path) { foreach ($r in $script:GameRoots) { if ($path.StartsWith($r, [StringComparison]::OrdinalIgnoreCase)) { $isGame = $true; break } } }
+        }
+        if ($isGame) { $script:GamePids[$p.Id] = $p.ProcessName; [void]$found.Add($p.ProcessName) }
+    }
+    foreach ($k in @($script:SeenPids.Keys)) { if (-not $alive.ContainsKey($k)) { $script:SeenPids.Remove($k) } }
+    foreach ($k in @($script:GamePids.Keys)) { if (-not $alive.ContainsKey($k)) { $script:GamePids.Remove($k) } }
+    @($found)
+}
+
+# ---------------------------------------------------------------------------
 # -ListOnly: report and exit, nothing is closed.
 # ---------------------------------------------------------------------------
 
 $script:Config = Read-Config
+
+if ($GameScan) {
+    'Game folders Bonk Mode watches:'
+    foreach ($r in Get-GameRoots) { '  ' + $r }
+    $now = @(Find-NewGames)
+    if ($now.Count) { 'Games running right now: ' + (($now | Select-Object -Unique) -join ', ') }
+    else { 'No game running right now.' }
+    return
+}
 
 if ($ListOnly) {
     Get-Rows | Sort-Object @{ e = { -not $_.Enabled } }, @{ e = { -not $_.Running } }, @{ e = { -$_.MB } } |
@@ -258,7 +337,20 @@ function Wait-Ui([int]$Ms) {
 }
 
 # Both return a status message; -Quiet skips the tray balloon (the window shows it instead).
+# $script:Busy stops game mode and timers from starting a second bonk mid-bonk.
+$script:Busy = $false
+
 function Invoke-Bonk([switch]$Quiet, [string]$Only) {
+    $script:Busy = $true
+    try { Invoke-BonkCore -Quiet:$Quiet -Only $Only } finally { $script:Busy = $false }
+}
+
+function Invoke-Release([switch]$Quiet, [string]$Only, [string[]]$Labels) {
+    $script:Busy = $true
+    try { Invoke-ReleaseCore -Quiet:$Quiet -Only $Only -Labels $Labels } finally { $script:Busy = $false }
+}
+
+function Invoke-BonkCore([switch]$Quiet, [string]$Only) {
     if ($Only) { $targets = @(Get-Rows | Where-Object { $_.Label -eq $Only -and $_.Running }) }
     else { $targets = @(Get-Rows | Where-Object { $_.Enabled -and $_.Running }) }
     $PoliteWaitMs = 1000 * [int]$script:Settings.polite
@@ -307,20 +399,22 @@ function Invoke-Bonk([switch]$Quiet, [string]$Only) {
     $msg
 }
 
-function Invoke-Release([switch]$Quiet, [string]$Only) {
+function Invoke-ReleaseCore([switch]$Quiet, [string]$Only, [string[]]$Labels) {
+    if ($Only) { $Labels = @($Only) }
     $all = @(Read-State)
-    $jailed = if ($Only) { @($all | Where-Object { $_.label -eq $Only }) } else { $all }
+    $jailed = @(if ($Labels) { $all | Where-Object { $Labels -contains $_.label } } else { $all })
     if (-not $jailed.Count) {
+        Write-Log ('RELEASE: nothing matched (asked for: {0}; in jail: {1})' -f ($Labels -join ', '), ((@($all) | ForEach-Object { $_.label }) -join ', '))
         if (-not $Quiet) { Show-Balloon 'Jail is empty' 'Nobody to release.' }
         return 'Jail is empty. Nobody to release.'
     }
     $rows = @(Get-Rows)
     $back = @(); $stay = @()
-    $keep = if ($Only) { @($all | Where-Object { $_.label -ne $Only }) } else { @() }
+    $keep = @(if ($Labels) { $all | Where-Object { $Labels -notcontains $_.label } })
     foreach ($j in $jailed) {
         $row = $rows | Where-Object { $_.Label -eq $j.label } | Select-Object -First 1
         if ($row -and $row.Running) { continue }   # already back on its own
-        $specs = @($j.relaunch) | Where-Object { $_ -and $_.file }
+        $specs = @(@($j.relaunch) | Where-Object { $_ -and $_.file })
         if (-not $specs.Count) { $stay += $j.label; continue }
         foreach ($s in $specs) {
             try {
@@ -418,7 +512,7 @@ function Restart-Tray {
 
 # Pull the latest release from GitHub. A git clone fast-forwards; a zip install
 # downloads the repo zip and copies only $UpdateFiles. Personal files are never touched.
-function Invoke-SelfUpdate {
+function Invoke-SelfUpdate([switch]$NoRestart) {
     $ui = $script:Ui
     $step = { param($p, $m) if ($ui -and -not $ui.IsDisposed) { $ui.SetUpdateProgress($p, $m) }; Wait-Ui 350 }
     try {
@@ -447,8 +541,13 @@ function Invoke-SelfUpdate {
                 if (Test-Path -LiteralPath $from) { Copy-Item -LiteralPath $from -Destination (Join-Path $AppDir $f) -Force }
             }
         }
+        $newVersion = (Get-Content -LiteralPath $VersionFile -Raw).Trim()
+        if ($NoRestart) {
+            Write-Log ('update installed: v{0}' -f $newVersion)
+            return ('Updated to v{0}. Restart Bonk Mode to use it.' -f $newVersion)
+        }
         & $step 100 'Done. Restarting with the new version...'
-        Write-Log 'update installed, restarting'
+        Write-Log ('update installed: v{0}, restarting' -f $newVersion)
         Wait-Ui 600
         Restart-Tray
         'Update installed. Restarting...'
@@ -469,6 +568,89 @@ function Test-UpdateQuiet {
             Show-Balloon "Bonk Mode v$remote is out" 'Double-click the hammer and open UPDATES (key 5) to install it.'
         }
     } catch { }
+}
+
+# --- Auto Game Mode loop ----------------------------------------------------
+
+$script:GameActive = $false
+$script:GameName = $null
+$script:GameGoneSince = $null
+$script:PendingDue = $null
+$script:AutoBonked = @()
+$script:InGameTick = $false
+
+function Update-UiGame {
+    if (-not $script:Ui -or $script:Ui.IsDisposed) { return }
+    $mode = [string]$script:Settings.gameMode
+    $text = if ($mode -eq 'off') { 'oFF' }
+            elseif ($script:PendingDue) { 'BoNKiNG iN ' + [math]::Max(0, [math]::Ceiling(($script:PendingDue - (Get-Date)).TotalSeconds)) + '...' }
+            elseif ($script:GameActive) { 'PLaYiNG ' + $script:GameName.ToUpper() }
+            else { $mode.ToUpper() + ' :: WaTCHiNG' }
+    $script:Ui.SetGameStatus($text)
+}
+
+function Start-GameBonk {
+    $script:PendingDue = $null
+    $before = @(Read-State | ForEach-Object { [string]$_.label })
+    $msg = Invoke-Bonk -Quiet
+    $after = @(Read-State | ForEach-Object { [string]$_.label })
+    $script:AutoBonked = @($after | Where-Object { $before -notcontains $_ })
+    Write-Log ('game mode bonk for {0}: {1} [jailed by game mode: {2}]' -f $script:GameName, $msg, ($script:AutoBonked -join ', '))
+    Show-Balloon ("Game on: {0}" -f $script:GameName) $msg
+    if ($script:Ui -and -not $script:Ui.IsDisposed) { Push-UiApps; $script:Ui.SetStatus('game mode: ' + $msg) }
+    Update-UiGame
+}
+
+function Stop-GameSession {
+    Write-Log ('game ended: {0} [paroling: {1}]' -f $script:GameName, (@($script:AutoBonked) -join ', '))
+    $labels = @($script:AutoBonked)
+    $script:GameActive = $false; $script:PendingDue = $null; $script:GameGoneSince = $null; $script:AutoBonked = @()
+    if ($labels.Count) {
+        $msg = Invoke-Release -Quiet -Labels $labels
+        Show-Balloon ('GG! {0} closed' -f $script:GameName) $msg
+        if ($script:Ui -and -not $script:Ui.IsDisposed) { Push-UiApps; $script:Ui.SetStatus('gg. ' + $msg) }
+    }
+    Update-UiGame
+}
+
+function Invoke-GameTick {
+    $mode = [string]$script:Settings.gameMode
+    if ($mode -eq 'off' -or $script:Busy -or $script:InGameTick) { return }
+    $script:InGameTick = $true
+    try {
+        $new = @(Find-NewGames)
+        if ($new.Count -and -not $script:GameActive) {
+            $script:GameActive = $true; $script:GameName = $new[0]; $script:GameGoneSince = $null
+            Write-Log ('game detected: {0}' -f $script:GameName)
+            if ($script:Ui -and -not $script:Ui.IsDisposed) { $script:Ui.ShowGameBanner($script:GameName) }
+            if ($mode -eq 'auto') { Start-GameBonk }
+            else {
+                $script:PendingDue = (Get-Date).AddSeconds(5)
+                Show-Balloon ("Game detected: {0}" -f $script:GameName) 'Bonking your background apps in 5 seconds. Click here to cancel.'
+            }
+        }
+        if ($script:GameActive) {
+            if ($script:GamePids.Count -gt 0) { $script:GameGoneSince = $null }
+            elseif (-not $script:GameGoneSince) { $script:GameGoneSince = Get-Date }
+            elseif (((Get-Date) - $script:GameGoneSince).TotalSeconds -ge 10) { Stop-GameSession }
+        }
+        Update-UiGame
+    } catch { Write-Log ('game tick failed: ' + $_.Exception.Message) }
+    finally { $script:InGameTick = $false }
+}
+
+function Invoke-CountdownTick {
+    if (-not $script:PendingDue) { return }
+    Update-UiGame
+    if ((Get-Date) -ge $script:PendingDue -and -not $script:Busy) { Start-GameBonk }
+}
+
+function Stop-GameCountdown {
+    if (-not $script:PendingDue) { return }
+    $script:PendingDue = $null
+    Write-Log ('game mode bonk cancelled for {0}' -f $script:GameName)
+    Show-Balloon 'Bonk cancelled' ("Everything stays open while you play {0}." -f $script:GameName)
+    Update-UiGame
 }
 
 function New-BonkWindow {
@@ -493,9 +675,11 @@ function New-BonkWindow {
         try {
             if ($key -eq 'autostart') { Set-Autostart ($value -eq 'True') }
             else { $script:Settings[$key] = $value; Save-Settings }
+            if ($key -eq 'gameMode') { if ($value -eq 'off') { $script:PendingDue = $null }; Update-UiGame }
         } catch { Write-Log ('setting failed: ' + $_.Exception.Message) }
     })
     $ui.add_EditClicked({ Start-Process notepad.exe -ArgumentList ('"{0}"' -f $ConfigFile) })
+    $ui.add_GameCancelClicked({ Stop-GameCountdown })
     $ui
 }
 
@@ -516,6 +700,7 @@ function Open-BonkWindow {
         $script:Ui = $ui
         Push-UiSettings
         Push-UiApps
+        Update-UiGame
         $ui.Show()
         $ui.Activate()
         $script:UiTimer.Start()
@@ -619,6 +804,23 @@ function Build-Menu {
     $edit.add_Click({ Start-Process notepad.exe -ArgumentList ('"{0}"' -f $ConfigFile) })
     [void]$menu.Items.Add($edit)
 
+    $gm = New-Object System.Windows.Forms.ToolStripMenuItem ('Auto Game Mode: ' + $script:Settings.gameMode)
+    foreach ($m in 'off', 'ask', 'auto') {
+        $it = New-Object System.Windows.Forms.ToolStripMenuItem $m
+        $it.Checked = ($script:Settings.gameMode -eq $m)
+        $it.Tag = 'gm:' + $m
+        $it.add_Click({
+            param($s, $e)
+            $v = $s.Tag.Substring(3)
+            $script:Settings.gameMode = $v; Save-Settings
+            if ($v -eq 'off') { $script:PendingDue = $null }
+            if ($script:Ui -and -not $script:Ui.IsDisposed) { $script:Ui.SetSetting('gameMode', $v) }
+            Update-UiGame
+        })
+        [void]$gm.DropDownItems.Add($it)
+    }
+    [void]$menu.Items.Add($gm)
+
     $auto = New-Object System.Windows.Forms.ToolStripMenuItem 'Start with Windows'
     $auto.Checked = Test-Autostart
     $auto.add_Click({ try { Set-Autostart (-not (Test-Autostart)) } catch { Write-Log ('autostart failed: ' + $_.Exception.Message) } })
@@ -638,6 +840,11 @@ $script:Menu.ShowCheckMargin = $true
 $script:Menu.ShowImageMargin = $false
 $script:Menu.add_Opening({ try { Build-Menu } catch { Write-Log ('menu failed: ' + $_.Exception.Message) } })
 Register-KeepOpen $script:Menu
+
+if ($UpdateNow) {
+    Invoke-SelfUpdate -NoRestart
+    return
+}
 
 if ($SelfTest) {
     # Build the real menu and print it; no icon, nothing closed.
@@ -663,7 +870,8 @@ if ($Preview) {
     [BonkMode.KeygenForm]::NoAudio = $true
     $ui = New-BonkWindow
     $script:Ui = $ui
-    Push-UiSettings
+    # Screenshots always show default settings, never this machine's.
+    foreach ($k in $DefaultSettings.Keys) { $ui.SetSetting($k, [string]$DefaultSettings[$k]) }
     $ui.SetSetting('autostart', 'False')
     # Demo inmates so screenshots never show anyone's real app list.
     $demo = @(
@@ -699,7 +907,10 @@ if ($Preview) {
         $bmp.Dispose()
         $file
     }
+    $ui.SetGameStatus('ASK :: WaTCHiNG')
     & $run 2.6; & $shoot 'home'
+    $ui.SetGameStatus('BoNKiNG iN 3...'); $ui.ShowGameBanner('SuperBonkQuest'); & $run 0.5; & $shoot 'gamemode'
+    $ui.SetGameStatus('PLaYiNG SUPERBONKQUEST'); & $run 2.5
     $ui.PreviewBonk(); & $run 0.62; & $shoot 'bonk'
     while ($ui.Busy) { $ui.Advance(0.03) }
     & $run 0.35; & $shoot 'jailed'
@@ -750,6 +961,17 @@ $script:UpdTimer = New-Object System.Windows.Forms.Timer
 $script:UpdTimer.Interval = 120000
 $script:UpdTimer.add_Tick({ $script:UpdTimer.Interval = 6 * 3600 * 1000; Test-UpdateQuiet })
 $script:UpdTimer.Start()
+
+# Auto Game Mode: look for new games every 4 seconds; the countdown ticks twice a second.
+$script:GameTimer = New-Object System.Windows.Forms.Timer
+$script:GameTimer.Interval = 4000
+$script:GameTimer.add_Tick({ Invoke-GameTick })
+$script:GameTimer.Start()
+$script:CountdownTimer = New-Object System.Windows.Forms.Timer
+$script:CountdownTimer.Interval = 500
+$script:CountdownTimer.add_Tick({ Invoke-CountdownTick })
+$script:CountdownTimer.Start()
+$script:NotifyIcon.add_BalloonTipClicked({ Stop-GameCountdown })
 
 $script:OpenPoll = New-Object System.Windows.Forms.Timer
 $script:OpenPoll.Interval = 300
