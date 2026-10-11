@@ -66,6 +66,14 @@ Start a game and Bonk Mode notices: **GAME ON!** It counts down five seconds (cl
 
 It watches every Steam library on your PC (read straight from Steam), plus Epic, Xbox, EA, Ubisoft and GOG folders. Got a game somewhere else? Add its folder or exe name to the `games` block in your `bonk-list.json`. The game you're playing is never bonked, even if it's on your list. Set it to **off**, **ask** (default) or **auto** in Settings or the tray menu.
 
+### HOG RADAR: new suspects, flagged for you
+
+![Hog radar](screenshots/home.png)
+
+Every 30 seconds the radar sweeps your PC for heavy apps that aren't on your list yet. Anything over the threshold (400 MB by default) shows up as a gold **NEW SUSPECT** card at the top of Home, with a little radar dish spinning in the corner. Hit **[+ LIST]** to sentence it, or **[SPARE]** to ignore it forever. Your list maintains itself.
+
+The radar never suggests Windows itself, shared engines other apps run on (like Edge WebView2), or developer and server runtimes (node, java, Docker), so it won't tempt you into bonking your Minecraft server.
+
 ### 2 · CELL BLOCK: visit the inmates
 
 ![Cell block](screenshots/cellblock.png)
@@ -152,6 +160,8 @@ Everything is inside the app on screen **4**, and every change saves instantly.
 | Hammer speed | Fast, normal, or **dramatic**. Dramatic is very dramatic. |
 | Polite warning | 2, 4 or 8 seconds for apps to close nicely before the hammer. |
 | Auto game mode | **Off**, **ask** (5 second countdown you can cancel) or **auto**. |
+| Hog radar | Flag heavy apps that aren't on your list. |
+| Radar threshold | 200, 400, 800 or 1500 MB before an app becomes a suspect. |
 | Start with Windows | Hammer in the tray at login. |
 | Check for updates | Looks for a new release on GitHub on open and every 6 hours. |
 
@@ -208,11 +218,16 @@ None of these close anything:
 .\bonk-mode.ps1 -SelfTest          # builds the tray menu and prints what parole would reopen
 .\bonk-mode.ps1 -Preview .\shots   # renders every keygen screen to PNG (uses demo apps)
 .\bonk-mode.ps1 -GameScan          # which game folders are watched, and is a game running now
+.\bonk-mode.ps1 -Radar             # heavy apps that are not on your list yet
 ```
 
 ---
 
 ## 📜 Version history
+
+### v2.2.0 · Hog Radar
+- Sweeps for heavy apps that aren't on your list and flags them as NEW SUSPECTS with one-click add or spare-forever.
+- Never suggests Windows, shared runtimes or dev/server runtimes.
 
 ### v2.1.0 · Auto Game Mode
 - Bonks automatically when a game starts (5 second countdown you can cancel, or fully auto) and paroles when it quits.

@@ -20,10 +20,11 @@
       -SelfTest           build the tray menu and print it
       -Preview <dir>      render keygen window frames to PNG files
       -GameScan           show game folders and any game running right now
+      -Radar              list heavy apps that are not on your bonk list yet
     Other:
       -UpdateNow          install the latest release without the tray (no restart)
 #>
-param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid, [switch]$GameScan, [string[]]$GameFolder, [switch]$UpdateNow)
+param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid, [switch]$GameScan, [string[]]$GameFolder, [switch]$UpdateNow, [switch]$Radar)
 
 $ErrorActionPreference = 'Stop'
 
@@ -52,7 +53,7 @@ $Version = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath 
 
 $DefaultSettings = [ordered]@{
     music = 'True'; volume = '60'; sfx = 'True'; shake = 'True'; scanlines = 'True'
-    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'
+    hammer = 'normal'; polite = '4'; autoUpdate = 'True'; gameMode = 'ask'; radar = 'True'; radarMB = '400'
 }
 
 function Read-Settings {
@@ -261,10 +262,73 @@ function Find-NewGames {
 }
 
 # ---------------------------------------------------------------------------
+# Hog Radar: heavy apps that are on nobody's list yet.
+# ---------------------------------------------------------------------------
+
+# Never suggested: shared runtimes other apps are built on, and dev/server runtimes
+# (closing node or java could take down a local server or a game server).
+$RadarIgnore = @('msedgewebview2', 'WebViewHost', 'CefSharp.BrowserSubprocess', 'node', 'java', 'javaw', 'dotnet',
+    'vmmem', 'vmmemWSL', 'wsl', 'wslhost', 'com.docker.backend', 'Docker Desktop', 'git', 'ssh', 'MemCompression')
+
+function Get-Suspects {
+    $threshold = [int]$script:Settings.radarMB
+    $snap = @(Get-Snapshot)
+    $covered = @{}
+    $spare = @{}
+    foreach ($n in @($script:Config.spareForever)) { if ($n) { $spare[$n] = $true } }
+    $patterns = New-Object System.Collections.ArrayList
+    foreach ($e in @($script:Config.apps)) {
+        foreach ($n in @($e.names)) { if ($n) { $covered[$n] = $true } }
+        foreach ($p in @($e.paths)) { if ($p) { [void]$patterns.Add([Environment]::ExpandEnvironmentVariables($p)) } }
+    }
+    $groups = @{}
+    foreach ($r in $snap) {
+        if ($covered.ContainsKey($r.Name) -or $spare.ContainsKey($r.Name) -or $RadarIgnore -contains $r.Name) { continue }
+        if ($r.Path -and ($r.Path.StartsWith($env:windir, [StringComparison]::OrdinalIgnoreCase) -or $r.Path.StartsWith($AppDir, [StringComparison]::OrdinalIgnoreCase))) { continue }
+        $hit = $false
+        if ($r.Path) { foreach ($pat in $patterns) { if ($r.Path -like $pat) { $hit = $true; break } } }
+        if ($hit) { continue }
+        if (-not $groups.ContainsKey($r.Name)) { $groups[$r.Name] = New-Object System.Collections.ArrayList }
+        [void]$groups[$r.Name].Add($r)
+    }
+    foreach ($name in $groups.Keys) {
+        $rows = $groups[$name]
+        $bytes = 0; foreach ($r in $rows) { $bytes += $r.WS }
+        $mb = [math]::Round($bytes / 1MB)
+        if ($mb -lt $threshold) { continue }
+        $path = ($rows | Where-Object { $_.Path } | Select-Object -First 1).Path
+        $label = $name
+        if ($path) { try { $desc = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($path).FileDescription; if ($desc -and $desc.Trim()) { $label = $desc.Trim() } } catch { } }
+        [pscustomobject]@{ Name = $name; Label = $label; MB = [int]$mb; Procs = $rows.Count; Path = $path }
+    }
+}
+
+function Add-Suspect([string]$Name, [string]$Label) {
+    $entry = [pscustomobject]@{ label = $(if ($Label) { $Label } else { $Name }); enabled = $true; names = @($Name) }
+    $script:Config.apps = @($script:Config.apps) + $entry
+    Save-Config
+    Write-Log ('radar: added {0} ({1}) to the list' -f $entry.label, $Name)
+}
+
+function Set-SpareForever([string]$Name) {
+    if (-not $script:Config.PSObject.Properties['spareForever']) { $script:Config | Add-Member -NotePropertyName spareForever -NotePropertyValue @() }
+    $script:Config.spareForever = @(@($script:Config.spareForever) + $Name | Where-Object { $_ } | Select-Object -Unique)
+    Save-Config
+    Write-Log ('radar: spared {0} forever' -f $Name)
+}
+
+# ---------------------------------------------------------------------------
 # -ListOnly: report and exit, nothing is closed.
 # ---------------------------------------------------------------------------
 
 $script:Config = Read-Config
+
+if ($Radar) {
+    'Hog Radar (threshold {0} MB, not on your list, not Windows, not spared):' -f $script:Settings.radarMB
+    $s = @(Get-Suspects | Sort-Object MB -Descending)
+    if ($s.Count) { $s | Format-Table Label, Name, MB, Procs -AutoSize | Out-String -Width 200 } else { '  No suspects. Your list has it covered.' }
+    return
+}
 
 if ($GameScan) {
     'Game folders Bonk Mode watches:'
@@ -653,6 +717,33 @@ function Stop-GameCountdown {
     Update-UiGame
 }
 
+# --- Hog Radar loop ---------------------------------------------------------
+
+$script:Suspects = @()
+$script:NotifiedSuspects = @{}
+
+function Push-UiSuspects {
+    if (-not $script:Ui -or $script:Ui.IsDisposed) { return }
+    $s = @($script:Suspects | Sort-Object MB -Descending)
+    $script:Ui.SetSuspects([string[]]@($s | ForEach-Object { $_.Name }), [string[]]@($s | ForEach-Object { $_.Label }),
+        [int[]]@($s | ForEach-Object { $_.MB }), [int[]]@($s | ForEach-Object { $_.Procs }))
+}
+
+function Invoke-RadarTick {
+    if ($script:Settings.radar -ne 'True' -or $script:Busy) { $script:Suspects = @(); Push-UiSuspects; return }
+    try {
+        $script:Suspects = @(Get-Suspects)
+        $fresh = @($script:Suspects | Where-Object { -not $script:NotifiedSuspects.ContainsKey($_.Name) })
+        foreach ($s in $fresh) { $script:NotifiedSuspects[$s.Name] = $true }
+        if ($fresh.Count -and -not $script:GameActive) {
+            $top = $fresh | Sort-Object MB -Descending | Select-Object -First 1
+            $more = if ($fresh.Count -gt 1) { ' (+{0} more)' -f ($fresh.Count - 1) } else { '' }
+            Show-Balloon ('NEW SUSPECT: {0}{1}' -f $top.Label, $more) ('{0} is eating {1} and is not on your bonk list. Double-click the hammer to sentence or spare it.' -f $top.Label, (Format-Size $top.MB))
+        }
+        Push-UiSuspects
+    } catch { Write-Log ('radar failed: ' + $_.Exception.Message) }
+}
+
 function New-BonkWindow {
     Import-BonkUi
     $ui = New-Object BonkMode.KeygenForm
@@ -680,6 +771,17 @@ function New-BonkWindow {
     })
     $ui.add_EditClicked({ Start-Process notepad.exe -ArgumentList ('"{0}"' -f $ConfigFile) })
     $ui.add_GameCancelClicked({ Stop-GameCountdown })
+    $ui.add_SuspectAction({
+        param($name, $action)
+        try {
+            $s = @($script:Suspects) | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+            if ($action -eq 'add') { Add-Suspect $name $(if ($s) { $s.Label } else { $name }) }
+            else { Set-SpareForever $name }
+            $script:Suspects = @($script:Suspects | Where-Object { $_.Name -ne $name })
+            Push-UiSuspects
+            Push-UiApps
+        } catch { Write-Log ('suspect action failed: ' + $_.Exception.Message) }
+    })
     $ui
 }
 
@@ -700,6 +802,7 @@ function Open-BonkWindow {
         $script:Ui = $ui
         Push-UiSettings
         Push-UiApps
+        Push-UiSuspects
         Update-UiGame
         $ui.Show()
         $ui.Activate()
@@ -895,6 +998,7 @@ if ($Preview) {
             [bool[]]($demo | ForEach-Object { $_[2] }), [bool[]]($demo | ForEach-Object { $_[3] }), [bool[]]($demo | ForEach-Object { $_[4] }),
             [int[]]($demo | ForEach-Object { $_[5] }), [string[]]($demo | ForEach-Object { $_[6] }), [string[]]($demo | ForEach-Object { $_[7] }))
     }
+    $ui.SetSuspects([string[]]@('GameBoostPro', 'WeatherWidgetPlus'), [string[]]@('GameBoost Pro (totally legit)', 'Weather Widget Plus'), [int[]]@(940, 455), [int[]]@(3, 1))
     $changelog = if (Test-Path -LiteralPath (Join-Path $AppDir 'CHANGELOG.md')) { Get-Content -LiteralPath (Join-Path $AppDir 'CHANGELOG.md') -Raw -Encoding UTF8 } else { '' }
     $ui.PreviewUpdate($Version, $changelog)
     $run = { param($sec) for ($i = 0; $i -lt [int]($sec / 0.03); $i++) { $ui.Advance(0.03) } }
@@ -971,7 +1075,13 @@ $script:CountdownTimer = New-Object System.Windows.Forms.Timer
 $script:CountdownTimer.Interval = 500
 $script:CountdownTimer.add_Tick({ Invoke-CountdownTick })
 $script:CountdownTimer.Start()
-$script:NotifyIcon.add_BalloonTipClicked({ Stop-GameCountdown })
+$script:NotifyIcon.add_BalloonTipClicked({ if ($script:PendingDue) { Stop-GameCountdown } else { Open-BonkWindow } })
+
+# Hog Radar: first sweep after 20 seconds, then every 30.
+$script:RadarTimer = New-Object System.Windows.Forms.Timer
+$script:RadarTimer.Interval = 20000
+$script:RadarTimer.add_Tick({ $script:RadarTimer.Interval = 30000; Invoke-RadarTick })
+$script:RadarTimer.Start()
 
 $script:OpenPoll = New-Object System.Windows.Forms.Timer
 $script:OpenPoll.Interval = 300

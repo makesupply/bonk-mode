@@ -353,7 +353,8 @@ namespace BonkMode
     {
         public string Label, Names, Relaunch;
         public int MB, Procs, Hash, Number;
-        public bool Enabled, Running, Jailed;
+        public bool Enabled, Running, Jailed, Suspect;
+        public string Proc;
         public RectangleF Rect;
         public float Shake, Flash, Bars, ShownMB, Nervous;
         public List<int> History = new List<int>();
@@ -393,6 +394,7 @@ namespace BonkMode
         public event Action<string> ParoleOneClicked;
         public event Action<string, string> SettingChanged;
         public event Action GameCancelClicked;
+        public event Action<string, string> SuspectAction;
 
         public static bool NoAudio;
 
@@ -432,6 +434,8 @@ namespace BonkMode
             new[] { "hammer", "cycle:fast,normal,dramatic", "Hammer speed", "How long each swing takes. Dramatic is very dramatic." },
             new[] { "polite", "cycle:2,4,8", "Polite warning", "Seconds apps get to close nicely before the hammer falls." },
             new[] { "gameMode", "cycle:off,ask,auto", "Auto game mode", "Bonk when a game starts, parole when it quits. Ask = 5 second countdown you can cancel." },
+            new[] { "radar", "bool", "Hog radar", "Flag heavy apps that are not on your list yet. Sweeps every 30 seconds." },
+            new[] { "radarMB", "cycle:200,400,800,1500", "Radar threshold", "How much RAM an unlisted app needs before it becomes a suspect." },
             new[] { "autostart", "bool", "Start with Windows", "Put the hammer in the tray at login." },
             new[] { "autoUpdate", "bool", "Check for updates", "Look for a new release on GitHub when this opens and every 6h." }
         };
@@ -439,6 +443,8 @@ namespace BonkMode
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         readonly List<AppInfo> apps = new List<AppInfo>();
         readonly List<AppInfo> homeOrder = new List<AppInfo>();
+        readonly List<AppInfo> suspects = new List<AppInfo>();
+        double radarPing = -1;
         readonly List<Head> homeHeads = new List<Head>();
         readonly Dictionary<string, Inmate> inmates = new Dictionary<string, Inmate>();
         readonly List<Particle> parts = new List<Particle>();
@@ -684,6 +690,7 @@ namespace BonkMode
             }
             for (int i = pops.Count - 1; i >= 0; i--) { pops[i].Age += fdt; if (pops[i].Age > 0.75f) pops.RemoveAt(i); }
             if (bannerT >= 0) { bannerT += dt; if (bannerT > 2.2) bannerT = -1; }
+            if (radarPing >= 0) { radarPing += dt; if (radarPing > 3) radarPing = -1; }
             shake = Math.Max(0, shake - fdt * 2.5f);
             scrollX -= dt * 140;
             if (scrollX < -scrollText.Length * charW) scrollX = W;
@@ -714,6 +721,33 @@ namespace BonkMode
         void Play(short[] s) { if (audio != null) audio.Play(s); }
 
         static bool IsTarget(AppInfo a) { return a.Running && a.Enabled && !a.Jailed; }
+
+        AppInfo FindSuspect(string proc)
+        {
+            foreach (AppInfo a in suspects) if (a.Proc == proc) return a;
+            return null;
+        }
+
+        public void SetSuspects(string[] procs, string[] labels, int[] mb, int[] count)
+        {
+            Dictionary<string, AppInfo> old = new Dictionary<string, AppInfo>();
+            foreach (AppInfo x in suspects) old[x.Proc] = x;
+            suspects.Clear();
+            bool fresh = false;
+            for (int i = 0; i < procs.Length; i++)
+            {
+                AppInfo a;
+                if (!old.TryGetValue(procs[i], out a))
+                {
+                    a = new AppInfo(); a.Proc = procs[i]; a.Suspect = true; a.Running = true;
+                    a.Hash = StableHash(procs[i]); a.Number = 1000 + (a.Hash % 9000); fresh = true;
+                }
+                a.Label = labels[i]; a.MB = mb[i]; a.Procs = count[i]; a.Names = procs[i];
+                suspects.Add(a);
+            }
+            if (fresh) { radarPing = 0; Play(sfxBlip); }
+            if (hammerIdx < 0) LayoutHome();
+        }
 
         AppInfo Find(string label)
         {
@@ -849,6 +883,7 @@ namespace BonkMode
                 else spared.Add(a);
             }
             float y = 0;
+            if (suspects.Count > 0) y = Section(y, "NeW SuSPeCTS", suspects, Gold, "HeaVY aPPS NoT oN YouR LiST. aDD THeM oR SPaRe THeM FoReVeR.");
             y = Section(y, "GoNNa GeT BoNKeD", targets, Red, "THeSe CLoSe WHeN You HiT BoNK. CLiCK oNe To SPaRe iT.");
             y = Section(y, "SPaReD", spared, Green, "THeSe STaY oPeN. CLiCK oNe To SeNTeNCe iT.");
             if (jailed.Count > 0) y = Section(y, "iN JaiL", jailed, Color.FromArgb(170, 170, 185), "CLoSeD BY a BoNK. PaRoLe BRiNGS THeM BaCK.");
@@ -864,6 +899,7 @@ namespace BonkMode
             Head h = new Head();
             h.Y = y; h.Col = col;
             h.Text = title + " (" + list.Count + ")" + (list.Count > 0 && title != "iN JaiL" ? "  ::  " + FormatSize(mb) : "");
+            if (title == "NeW SuSPeCTS" && radarPing >= 0 && radarPing < 1.5 && (int)(radarPing * 6) % 2 == 0) h.Col = Color.White;
             h.Right = Leet(hint);
             homeHeads.Add(h);
             y += 24;
@@ -1078,6 +1114,18 @@ namespace BonkMode
                     i = (i + (act == "next" ? 1 : opts.Length - 1)) % opts.Length;
                     ChangeSetting(key, opts[i]);
                 }
+                return;
+            }
+            if (id.StartsWith("susadd:") || id.StartsWith("susspare:"))
+            {
+                bool add = id.StartsWith("susadd:");
+                string proc = id.Substring(id.IndexOf(':') + 1);
+                AppInfo s = FindSuspect(proc);
+                if (s != null) { suspects.Remove(s); LayoutHome(); }
+                Play(add ? sfxSlam : sfxClick);
+                if (add && shakeOn) shake = 0.3f;
+                status = Leet(add ? "added to the bonk list: " + (s != null ? s.Label : proc) : "spared forever: " + (s != null ? s.Label : proc));
+                if (SuspectAction != null) SuspectAction(proc, add ? "add" : "spare");
                 return;
             }
             if (id == "gamecancel") { Play(sfxClick); if (GameCancelClicked != null) GameCancelClicked(); return; }
@@ -1396,7 +1444,8 @@ namespace BonkMode
                 if (r.Bottom < area.Top || r.Top > area.Bottom) continue;
                 DrawTile(g, a, r);
                 RectangleF vis = RectangleF.Intersect(r, area);
-                if (vis.Height > 4) Zone(vis, "tile:" + a.Label);
+                if (vis.Height > 4) Zone(vis, (a.Suspect ? "sustile:" : "tile:") + (a.Suspect ? a.Proc : a.Label));
+                if (a.Suspect) DrawSuspectButtons(g, a, r, area);
             }
             g.ResetClip();
             Scrollbar(g, W - 26, area.Top, area.Bottom, homeContentH, homeScroll);
@@ -1406,11 +1455,14 @@ namespace BonkMode
             // hover info bar: the full truth about whatever card is under the mouse
             string info;
             AppInfo hov = (hoverId != null && hoverId.StartsWith("tile:")) ? Find(hoverId.Substring(5)) : null;
-            if (hov != null)
+            AppInfo hs = (hoverId != null && (hoverId.StartsWith("sus"))) ? FindSuspect(hoverId.Substring(hoverId.IndexOf(':') + 1)) : null;
+            if (hs != null)
+                info = "> " + hs.Label + "  ::  " + FormatSize(hs.MB) + " iN " + hs.Procs + " PRoCeSSeS  ::  " + hs.Proc + ".eXe  ::  NoT oN YouR LiST";
+            else if (hov != null)
                 info = "> " + hov.Label + "  ::  " + (hov.Jailed ? "iN JaiL" : FormatSize(hov.MB) + " iN " + hov.Procs + " PRoCeSSeS") + "  ::  " + hov.Names;
             else
                 info = Leet("> left-click a card to sentence/spare it. right-click for its dossier. wheel scrolls.");
-            g.DrawString(info, fSmall, B(hov != null ? Color.Yellow : Color.FromArgb(150, 160, 150)), new RectangleF(24, 591, W - 48, 16), sfLeftMid);
+            g.DrawString(info, fSmall, B(hov != null || hs != null ? Color.Yellow : Color.FromArgb(150, 160, 150)), new RectangleF(24, 591, W - 48, 16), sfLeftMid);
 
             int tCount = targets;
             Color bonkBg = tCount > 0 && !Busy ? ((int)(t * 4) % 2 == 0 ? Color.FromArgb(150, 0, 0) : Color.FromArgb(210, 40, 0)) : Color.FromArgb(40, 40, 40);
@@ -1432,6 +1484,7 @@ namespace BonkMode
         void DrawTile(Graphics g, AppInfo a, RectangleF r)
         {
             if (a.Shake > 0) r.Offset((float)(Math.Sin(t * 90 + a.Hash) * a.Shake * 6), (float)(Math.Cos(t * 70) * a.Shake * 3));
+            if (a.Suspect) { DrawSuspectTile(g, a, r); return; }
             bool target = IsTarget(a), jailed = a.Jailed;
             bool hot = Hot("tile:" + a.Label);
             Color edge = jailed ? Color.FromArgb(150, 70, 70) : target ? Red : Green;
@@ -1487,6 +1540,47 @@ namespace BonkMode
             if (a.Flash > 0) g.FillRectangle(B(Color.FromArgb((int)(220 * a.Flash), 255, 255, 255)), r);
         }
 
+        void DrawSuspectTile(Graphics g, AppInfo a, RectangleF r)
+        {
+            bool hot = Hot("sustile:" + a.Proc) || Hot("susadd:" + a.Proc) || Hot("susspare:" + a.Proc);
+            bool blink = (int)(t * 3 + a.Hash % 7) % 2 == 0;
+            g.FillRectangle(B(hot ? Color.FromArgb(240, 46, 40, 10) : Color.FromArgb(230, 22, 18, 4)), r);
+            g.DrawRectangle(P(blink ? Gold : Color.FromArgb(150, 120, 0)), r.X, r.Y, r.Width - 1, r.Height - 1);
+            g.DrawRectangle(P(Color.FromArgb(90, 255, 210, 0)), r.X + 2, r.Y + 2, r.Width - 5, r.Height - 5);
+            SizeF cs = g.MeasureString("SuSPeCT", fTiny);
+            g.FillRectangle(B(Gold), r.X + 5, r.Y + 5, cs.Width, 13);
+            g.DrawString("SuSPeCT", fTiny, Brushes.Black, r.X + 5, r.Y + 6);
+            // little radar dish sweeping in the corner
+            float rx = r.Right - 16, ry = r.Y + 13, rr = 9;
+            GraphicsState st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.FillEllipse(B(Color.FromArgb(20, 60, 30)), rx - rr, ry - rr, rr * 2, rr * 2);
+            g.DrawEllipse(P(Green), rx - rr, ry - rr, rr * 2, rr * 2);
+            double ang = t * 4 + a.Hash;
+            g.DrawLine(P(Green), rx, ry, rx + (float)Math.Cos(ang) * rr, ry + (float)Math.Sin(ang) * rr);
+            if ((int)(t * 2) % 2 == 0) g.FillEllipse(B(Red), rx + 3, ry - 4, 3, 3);
+            g.Restore(st);
+            RectangleF nr = new RectangleF(r.X + 6, r.Y + 22, r.Width - 12, 26);
+            g.DrawString(a.Label, fName, B(Color.White), nr, sfWrap);
+            Color mbc = a.MB >= 1024 ? Color.FromArgb(255, 80, 80) : Color.Yellow;
+            g.DrawString(FormatShort(a.MB) + "  x" + a.Procs, fTileBig, B(mbc), new RectangleF(r.X, r.Y + 48, r.Width, 22), sfCenter);
+        }
+
+        void DrawSuspectButtons(Graphics g, AppInfo a, RectangleF r, Rectangle area)
+        {
+            float bw = (r.Width - 15) / 2f;
+            RectangleF add = new RectangleF(r.X + 5, r.Bottom - 26, bw, 20);
+            RectangleF spare = new RectangleF(r.X + 10 + bw, r.Bottom - 26, bw, 20);
+            bool vis = add.Top >= area.Top && add.Bottom <= area.Bottom;
+            bool ha = vis && Hot("susadd:" + a.Proc), hsp = vis && Hot("susspare:" + a.Proc);
+            g.FillRectangle(B(ha ? Red : Color.FromArgb(110, 0, 0)), add);
+            g.DrawRectangle(P(Color.Yellow), add.X, add.Y, add.Width - 1, add.Height - 1);
+            g.DrawString("+ LiST", fTiny, B(ha ? Color.Black : Color.Yellow), add, sfCenter);
+            g.FillRectangle(B(hsp ? Green : Color.FromArgb(0, 50, 25)), spare);
+            g.DrawRectangle(P(Green), spare.X, spare.Y, spare.Width - 1, spare.Height - 1);
+            g.DrawString("SPaRe", fTiny, B(hsp ? Color.Black : Green), spare, sfCenter);
+            if (vis) { Zone(add, "susadd:" + a.Proc); Zone(spare, "susspare:" + a.Proc); }
+        }
         StringFormat right;
         StringFormat RightAlign()
         {
@@ -1851,7 +1945,7 @@ namespace BonkMode
                 else
                 {
                     Button(g, new RectangleF(cx, y + 2, 36, 28), "<", "set:" + key + ":prev", Color.Black, Green, true);
-                    string shown = key == "polite" ? v + " SeC" : Leet(v);
+                    string shown = key == "polite" ? v + " SeC" : key == "radarMB" ? v + " MB" : Leet(v);
                     g.FillRectangle(B(Color.FromArgb(0, 30, 15)), cx + 40, y + 2, 190, 28);
                     g.DrawString(shown, fBtn, B(Gold), new RectangleF(cx + 40, y + 2, 190, 28), sfCenter);
                     Button(g, new RectangleF(cx + 234, y + 2, 36, 28), ">", "set:" + key + ":next", Color.Black, Green, true);

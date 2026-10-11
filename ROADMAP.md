@@ -13,11 +13,9 @@ This is the plan, not a promise. Order may change. Ideas welcome in [Issues](htt
 | v2.0.0 | The Cell Block Update | Six screens, inmates, dossiers, settings, live updater |
 | v2.0.1 | Credit Where Credit Is Due | Apache 2.0 + NOTICE |
 | v2.1.0 | Auto Game Mode | Bonks when a game starts, paroles when it quits |
+| v2.2.0 | Hog Radar | Flags heavy apps that are not on your list yet |
 
 ## 🔜 Next up
-
-### v2.2.0 · Hog Radar
-A new app starts eating gigabytes? **NEW SUSPECT DETECTED.** One click adds it to your list, or spares it forever. The list maintains itself.
 
 ### v2.3.0 · Startup Jail
 See every app that launches when Windows boots and how much it slows you down. Jail the freeloaders from startup. Every change can be undone, and nothing is deleted.

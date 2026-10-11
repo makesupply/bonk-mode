@@ -1,5 +1,13 @@
 # Bonk Mode changelog
 
+## v2.2.0 - Hog Radar
+- Every 30 seconds Bonk Mode sweeps for heavy apps that are not on your bonk list. Anything over the threshold (400 MB by default) becomes a NEW SUSPECT.
+- Suspects get their own gold section at the top of Home with a radar sweep. [+ LIST] adds one to your bonk list in a click, [SPARE] ignores it forever.
+- One notification per new suspect, never during a game.
+- Never suggests Windows itself, Bonk Mode, shared runtimes like Edge WebView2, or dev and server runtimes like node, java and Docker.
+- Settings: Hog radar on/off and the radar threshold (200, 400, 800 or 1500 MB).
+- New: -Radar lists current suspects without changing anything.
+
 ## v2.1.0 - Auto Game Mode
 - Start a game and Bonk Mode notices. It counts down 5 seconds (click the notification or CANCEL to stop it), then bonks your list. Quit the game and everything it bonked gets paroled 10 seconds later.
 - Watches Steam libraries (all of them, read from Steam's own library list), Epic, Xbox, EA, Ubisoft and GOG folders, plus any folders or exe names you add to the new games block in bonk-list.json.
