@@ -1,3 +1,6 @@
+// Bonk Mode - https://github.com/makesupply/bonk-mode
+// Copyright 2026 makesupply. Licensed under the Apache License 2.0; see LICENSE and NOTICE.
+// Derivative works must keep the NOTICE attribution.
 // Bonk Mode keygen window v2. Compiled at runtime by bonk-mode.ps1 (C# 5, .NET Framework).
 // One double-buffered GDI+ form with six screens; chiptune music and sound effects are
 // synthesized square/triangle/noise streamed through winmm waveOut. No asset files.
@@ -519,7 +522,7 @@ namespace BonkMode
                 "VISIT THE CELL BLOCK AND GRANT PAROLE ONE INMATE AT A TIME ...   THE UPDATER PULLS FRESH CRACKS STRAIGHT FROM GITHUB ...   " +
                 "STEAM, YOUR GPU DRIVER AND WINDOWS HAVE DIPLOMATIC IMMUNITY ...   " +
                 "GREETZ FLY OUT TO RAZOR 1911, FAIRLIGHT, RELOADED, CODEX, SKIDROW, SND, CPY AND EVERY KEYGEN MUSICIAN WHO MADE A 40KB TRACKER FILE SLAP ...   " +
-                "NO GREETZ TO ADOBE CREATIVE CLOUD, YOU KNOW WHAT YOU DID ...   [1-6] SCREENS  [B] BONK  [P] PAROLE  [M] MUSIC  [ESC] EXIT ...   ";
+                "NO GREETZ TO ADOBE CREATIVE CLOUD, YOU KNOW WHAT YOU DID ...   BONK MODE IS OPEN SOURCE UNDER APACHE 2.0, FORKS MUST CREDIT GITHUB.COM/MAKESUPPLY/BONK-MODE ...   [1-6] SCREENS  [B] BONK  [P] PAROLE  [M] MUSIC  [ESC] EXIT ...   ";
             using (Graphics g = CreateGraphics())
                 charW = g.MeasureString("MMMMMMMMMM", fScroll, PointF.Empty, StringFormat.GenericTypographic).Width / 10f;
             scrollX = W;
@@ -1954,8 +1957,8 @@ namespace BonkMode
                 "    [1-6] SCReeNS  [B] BoNK  [P] PaRoLe",
                 "    [M] MuSiC  [eSC] eXiT  WHeeL SCRoLLS",
                 "",
-                "  SYSTeM ReQuiReMeNTS:",
-                "    a HaMMeR. a DReaM. WiNDoWS."
+                "  oPeN SouRCe (aPaCHe-2.0):",
+                "    FoRKS MuST CReDiT GiTHuB.CoM/MaKeSuPPLY/BoNK-MoDe"
             };
             for (int i = 0; i < nfo.Length; i++)
             {

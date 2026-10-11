@@ -1,5 +1,10 @@
 # Bonk Mode changelog
 
+## v2.0.1 - Credit Where Credit Is Due
+- Relicensed from MIT to Apache License 2.0 with a NOTICE file. Forks and derivatives must keep the attribution: "Based on Bonk Mode by makesupply".
+- License headers in the source files, and credit on the Greetz screen and in the scroller.
+- The updater now also ships the NOTICE file.
+
 ## v2.0.0 - The Cell Block Update
 - Six screens in one keygen: Home, Cell Block, Dossiers, Settings, Updates, Greetz. Keys 1-6, glitch-wipe transitions.
 - Home groups every app under GONNA GET BONKED / SPARED / IN JAIL with big readable names, so you know exactly what the hammer hits.

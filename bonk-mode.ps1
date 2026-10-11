@@ -1,4 +1,7 @@
 #Requires -Version 5.1
+# Bonk Mode - https://github.com/makesupply/bonk-mode
+# Copyright 2026 makesupply. Licensed under the Apache License 2.0; see LICENSE and NOTICE.
+# Derivative works must keep the NOTICE attribution.
 <#
     Bonk Mode - a tray hammer that sends background apps to RAM jail before gaming.
 
@@ -41,7 +44,7 @@ $RepoUrl    = 'https://github.com/makesupply/bonk-mode'
 $RawBase    = 'https://raw.githubusercontent.com/makesupply/bonk-mode/main/'
 $RepoZip    = 'https://codeload.github.com/makesupply/bonk-mode/zip/refs/heads/main'
 # Files an update may replace. Your bonk-list.json, settings.json and jail state are never touched.
-$UpdateFiles = @('bonk-mode.ps1', 'bonk-ui.cs', 'bonk-list.example.json', 'install.ps1', 'README.md', 'CHANGELOG.md', 'VERSION', 'LICENSE')
+$UpdateFiles = @('bonk-mode.ps1', 'bonk-ui.cs', 'bonk-list.example.json', 'install.ps1', 'README.md', 'CHANGELOG.md', 'VERSION', 'LICENSE', 'NOTICE')
 $Version = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath $VersionFile -Raw).Trim() } else { '0.0.0' }
 
 $DefaultSettings = [ordered]@{

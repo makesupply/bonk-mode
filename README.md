@@ -204,6 +204,10 @@ None of these close anything:
 
 ## 📜 Version history
 
+### v2.0.1 · Credit Where Credit Is Due
+- Relicensed to **Apache 2.0 + NOTICE**: forks and derivatives must credit the original.
+- Credit added to the Greetz screen, the scroller and the source headers.
+
 ### v2.0.0 · The Cell Block Update
 - Six screens in one keygen: **Home, Cell Block, Dossiers, Settings, Updates, Greetz**, with glitch-wipe transitions.
 - Home groups apps under **GONNA GET BONKED / SPARED / IN JAIL** with big readable names.
@@ -257,8 +261,20 @@ No greetz to Adobe Creative Cloud. You know what you did.
 
 ---
 
+## 📄 License and credit
+
+Bonk Mode is open source under the **[Apache License 2.0](LICENSE)**. Use it, change it, fork it, ship it, even sell it.
+
+**One rule: credit the original.** If you distribute Bonk Mode or anything built from it, keep the [NOTICE](NOTICE) file (Apache 2.0, section 4d), and please put this somewhere people will see it:
+
+> Based on Bonk Mode by makesupply · https://github.com/makesupply/bonk-mode
+
+Versions up to v2.0.0 were released under MIT. Everything from v2.0.1 on is Apache 2.0.
+
+---
+
 <div align="center">
 
-**MIT licensed. Bonk responsibly.** 🔨
+**Apache 2.0. Credit the hammer. Bonk responsibly.** 🔨
 
 </div>
