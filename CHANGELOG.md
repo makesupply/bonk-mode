@@ -1,5 +1,8 @@
 # Bonk Mode changelog
 
+## v2.6.2 - Store Apps Know The Way Home
+- Fixed: paroling a Microsoft Store app added by Hog Radar (for example ChatGPT) failed with "Access is denied", because Windows doesn't allow launching Store apps straight from their install folder. Bonk Mode now recognizes them and tells you they come back when you open them.
+
 ## v2.6.1 - Where's The Volume Knob
 - Speaker button in the top-right corner, next to minimize: one click turns the music on or off on any screen. It pulses while the tunes play and shows an X when muted. (The music button had been squeezed off the Home screen by the profile switcher.)
 

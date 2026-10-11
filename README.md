@@ -265,6 +265,9 @@ None of these close anything:
 
 ## 📜 Version history
 
+### v2.6.2 · Store Apps Know The Way Home
+- Fixed parole for Microsoft Store apps added by Hog Radar.
+
 ### v2.6.1 · Where's The Volume Knob
 - Speaker button next to minimize toggles the music from any screen.
 

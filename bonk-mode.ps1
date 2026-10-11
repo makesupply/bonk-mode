@@ -223,7 +223,9 @@ function Resolve-Relaunch($Entry, $Procs) {
         $first = @($Entry.names)[0]
         $main = $Procs | Where-Object { $_.Name -eq $first -and $_.Path } | Select-Object -First 1
         if (-not $main) { $main = $Procs | Where-Object { $_.Path } | Select-Object -First 1 }
-        if ($main) { return @([pscustomobject]@{ file = $main.Path; args = '' }) }
+        # Microsoft Store apps live under WindowsApps, which Windows won't let anyone launch
+        # directly ("Access is denied"). They come back when you open them from Start.
+        if ($main -and $main.Path -notmatch '\\WindowsApps\\') { return @([pscustomobject]@{ file = $main.Path; args = '' }) }
         return @()
     }
     @($prop.Value) | ForEach-Object {
