@@ -1,0 +1,5 @@
+# your personal kill list, jail roster, and log stay on your machine
+bonk-list.json
+bonk-state.json
+bonk.log
+*.lnk
