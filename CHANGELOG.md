@@ -1,5 +1,8 @@
 # Bonk Mode changelog
 
+## v2.6.1 - Where's The Volume Knob
+- Speaker button in the top-right corner, next to minimize: one click turns the music on or off on any screen. It pulses while the tunes play and shows an X when muted. (The music button had been squeezed off the Home screen by the profile switcher.)
+
 ## v2.6.0 - Solitary Confinement
 - Some apps restart themselves after a bonk (watchdogs, updaters, helper services). Mark them SOLO and they get shut straight back down within 3 seconds, every time, with every escape attempt counted.
 - If you open a jailed app yourself (Start menu, taskbar, desktop), Bonk Mode sees Explorer started it and paroles it instead of fighting you.

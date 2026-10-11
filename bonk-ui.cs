@@ -1389,6 +1389,7 @@ namespace BonkMode
                 DrawScroller(g);
                 if (scanOn) g.DrawImageUnscaled(overlay, 0, 0);
                 g.DrawRectangle(P(DimGreen), 0, 0, W - 1, H - 1);
+                SpeakerButton(g, new Rectangle(W - 106, 6, 30, 18));
                 SmallButton(g, new Rectangle(W - 72, 6, 30, 18), "_", "min");
                 SmallButton(g, new Rectangle(W - 38, 6, 30, 18), "X", "close");
             }
@@ -1530,6 +1531,33 @@ namespace BonkMode
             if (enabled) Zone(r, id);
         }
 
+        // Music on/off, always visible next to the window buttons.
+        void SpeakerButton(Graphics g, Rectangle r)
+        {
+            bool on = IsTrue(settings["music"]);
+            bool hot = Hot("music");
+            Color fg = hot ? Color.Black : on ? Green : Red;
+            g.FillRectangle(B(hot ? (on ? Green : Red) : Color.Black), r);
+            g.DrawRectangle(P(on ? Green : Red), r.X, r.Y, r.Width - 1, r.Height - 1);
+            GraphicsState st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float x = r.X + 7, y = r.Y + r.Height / 2f;
+            g.FillRectangle(B(fg), x, y - 3, 4, 6);
+            g.FillPolygon(B(fg), new[] { new PointF(x + 3, y - 3), new PointF(x + 9, y - 7), new PointF(x + 9, y + 7), new PointF(x + 3, y + 3) });
+            if (on)
+            {
+                float pulse = (float)(0.5 + 0.5 * Math.Sin(t * 8));
+                g.DrawArc(P(fg), x + 8, y - 4, 6, 8, -60, 120);
+                g.DrawArc(P(Color.FromArgb((int)(120 + 135 * pulse), fg)), x + 9, y - 7, 9, 14, -60, 120);
+            }
+            else
+            {
+                g.DrawLine(P(fg), x + 12, y - 4, x + 18, y + 4);
+                g.DrawLine(P(fg), x + 12, y + 4, x + 18, y - 4);
+            }
+            g.Restore(st);
+            Zone(r, "music");
+        }
         void SmallButton(Graphics g, Rectangle r, string text, string id)
         {
             bool hot = Hot(id);

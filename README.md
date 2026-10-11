@@ -163,7 +163,7 @@ They talk to the running tray, or start it if it isn't running.
 | `Ctrl+Alt+K` | Open the keygen |
 | `B` | BONK 'EM ALL |
 | `P` | Parole everyone |
-| `M` | Music on/off |
+| `M` | Music on/off (or click the speaker in the top-right corner) |
 | Mouse wheel | Scroll cards, cells, lists, changelog |
 | `Esc` | Close the window (the tray stays) |
 
@@ -264,6 +264,9 @@ None of these close anything:
 ---
 
 ## 📜 Version history
+
+### v2.6.1 · Where's The Volume Knob
+- Speaker button next to minimize toggles the music from any screen.
 
 ### v2.6.0 · Solitary Confinement
 - Mark a jailed app SOLO and it gets shut straight back down whenever it restarts itself, with escape attempts counted.
