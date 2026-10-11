@@ -1,0 +1,24 @@
+# Bonk Mode changelog
+
+## v2.0.0 - The Cell Block Update
+- Six screens in one keygen: Home, Cell Block, Dossiers, Settings, Updates, Greetz. Keys 1-6, glitch-wipe transitions.
+- Home groups every app under GONNA GET BONKED / SPARED / IN JAIL with big readable names, so you know exactly what the hammer hits.
+- Targets get pulsing crosshairs and sweat nervously. As they should.
+- Cell Block: every jailed app is a striped inmate pacing its cell and yelling things. Parole them one at a time and watch them run.
+- Dossiers: rap sheet for every app on your list, with mugshot, process aliases, parole plan and a live RAM chart. Bonk or parole a single app from here.
+- Settings inside the app: music, volume, sound FX, screen shake, scanlines, hammer speed, polite warning, start with Windows, update checks.
+- Live updater: checks GitHub, shows this changelog, installs with one click, and restarts itself. Your bonk list and settings survive.
+- A warden hammer patrols the cell block. A mascot hammer with googly eyes practices swings next to the logo.
+- Greetz screen with a plasma background and a spinning cube, because it is the law.
+
+## v1.1.0 - The Keygen
+- Double-click the tray hammer to open a 1999-style keygen window.
+- Wobbling dithered ASCII logo, copper bars, starfield, CRT scanlines, typing NFO box.
+- Hammer animation with screen shake, comic BONK bursts, flying RAM bits and prison bars.
+- Original chiptune and sound effects synthesized live. No audio files.
+
+## v1.0.0 - First Bonk
+- Tray hammer with BONK 'EM ALL and Release from RAM jail.
+- Polite close first, force close after a few seconds.
+- Kill list in bonk-list.json with checkboxes in the tray menu.
+- Diplomatic immunity for Steam, Explorer, the GPU driver and Windows core.

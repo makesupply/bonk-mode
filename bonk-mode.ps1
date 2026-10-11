@@ -17,9 +17,13 @@
       -SelfTest           build the tray menu and print it
       -Preview <dir>      render keygen window frames to PNG files
 #>
-param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview)
+param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid)
 
 $ErrorActionPreference = 'Stop'
+
+# After a self-update the new tray waits for the old one to exit.
+if ($WaitPid) { try { [void](Get-Process -Id $WaitPid -ErrorAction Stop).WaitForExit(15000) } catch { } }
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $AppDir     = $PSScriptRoot
 $ConfigFile = Join-Path $AppDir 'bonk-list.json'
@@ -31,6 +35,37 @@ $RunName    = 'Bonk Mode'
 $MutexName  = 'Local\Bonk_Mode_Tray'
 $OpenEventName = 'Local\Bonk_Mode_Open'
 $UiSource   = Join-Path $AppDir 'bonk-ui.cs'
+$SettingsFile = Join-Path $AppDir 'settings.json'
+$VersionFile  = Join-Path $AppDir 'VERSION'
+$RepoUrl    = 'https://github.com/makesupply/bonk-mode'
+$RawBase    = 'https://raw.githubusercontent.com/makesupply/bonk-mode/main/'
+$RepoZip    = 'https://codeload.github.com/makesupply/bonk-mode/zip/refs/heads/main'
+# Files an update may replace. Your bonk-list.json, settings.json and jail state are never touched.
+$UpdateFiles = @('bonk-mode.ps1', 'bonk-ui.cs', 'bonk-list.example.json', 'install.ps1', 'README.md', 'CHANGELOG.md', 'VERSION', 'LICENSE')
+$Version = if (Test-Path -LiteralPath $VersionFile) { (Get-Content -LiteralPath $VersionFile -Raw).Trim() } else { '0.0.0' }
+
+$DefaultSettings = [ordered]@{
+    music = 'True'; volume = '60'; sfx = 'True'; shake = 'True'; scanlines = 'True'
+    hammer = 'normal'; polite = '4'; autoUpdate = 'True'
+}
+
+function Read-Settings {
+    $s = @{}
+    foreach ($k in $DefaultSettings.Keys) { $s[$k] = $DefaultSettings[$k] }
+    if (Test-Path -LiteralPath $SettingsFile) {
+        try {
+            $j = Get-Content -LiteralPath $SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($p in $j.PSObject.Properties) { $s[$p.Name] = [string]$p.Value }
+        } catch { }
+    }
+    $s
+}
+
+function Save-Settings {
+    $script:Settings | ConvertTo-Json | Set-Content -LiteralPath $SettingsFile -Encoding UTF8
+}
+
+$script:Settings = Read-Settings
 $PoliteWaitMs = 4000
 
 # Never bonked: Windows core, the launcher you game from, GPU driver, security,
@@ -220,8 +255,10 @@ function Wait-Ui([int]$Ms) {
 }
 
 # Both return a status message; -Quiet skips the tray balloon (the window shows it instead).
-function Invoke-Bonk([switch]$Quiet) {
-    $targets = @(Get-Rows | Where-Object { $_.Enabled -and $_.Running })
+function Invoke-Bonk([switch]$Quiet, [string]$Only) {
+    if ($Only) { $targets = @(Get-Rows | Where-Object { $_.Label -eq $Only -and $_.Running }) }
+    else { $targets = @(Get-Rows | Where-Object { $_.Enabled -and $_.Running }) }
+    $PoliteWaitMs = 1000 * [int]$script:Settings.polite
     if (-not $targets.Count) {
         $msg = 'Nothing to bonk. Your RAM is living its best life.'
         if (-not $Quiet) { Show-Balloon 'Nothing to bonk' $msg }
@@ -267,14 +304,16 @@ function Invoke-Bonk([switch]$Quiet) {
     $msg
 }
 
-function Invoke-Release([switch]$Quiet) {
-    $jailed = @(Read-State)
+function Invoke-Release([switch]$Quiet, [string]$Only) {
+    $all = @(Read-State)
+    $jailed = if ($Only) { @($all | Where-Object { $_.label -eq $Only }) } else { $all }
     if (-not $jailed.Count) {
         if (-not $Quiet) { Show-Balloon 'Jail is empty' 'Nobody to release.' }
         return 'Jail is empty. Nobody to release.'
     }
     $rows = @(Get-Rows)
     $back = @(); $stay = @()
+    $keep = if ($Only) { @($all | Where-Object { $_.label -ne $Only }) } else { @() }
     foreach ($j in $jailed) {
         $row = $rows | Where-Object { $_.Label -eq $j.label } | Select-Object -First 1
         if ($row -and $row.Running) { continue }   # already back on its own
@@ -288,7 +327,7 @@ function Invoke-Release([switch]$Quiet) {
         }
         $back += $j.label
     }
-    Save-State @()
+    Save-State $keep
     Write-Log ('RELEASE: ' + ($back -join ', '))
     $msg = if ($back.Count) { 'Parole granted: ' + ($back -join ', ') + '.' } else { 'Everyone was already out.' }
     if ($stay.Count) { $msg += ' Comes back on its own or when you open it: ' + ($stay -join ', ') + '.' }
@@ -316,19 +355,43 @@ function Import-BonkUi {
     if (-not ('BonkMode.KeygenForm' -as [type])) { Add-Type -Path $dll }
 }
 
-function Push-UiRows {
+function Get-RelaunchSummary($Entry) {
+    $prop = $Entry.PSObject.Properties['relaunch']
+    if ($prop -and $null -eq $prop.Value) { return 'Nothing to do. Windows or the app brings it back on its own.' }
+    if (-not $prop -or $prop.Value -is [string]) { return 'Reopens the same program it was running.' }
+    'Reopens ' + ((@($prop.Value) | ForEach-Object { Split-Path -Leaf ([string]$_.file) }) -join ' + ')
+}
+
+function Push-UiApps {
     $ui = $script:Ui
     if (-not $ui -or $ui.IsDisposed) { return }
     $rows = @(Get-Rows)
     $jailed = @(Read-State | ForEach-Object { [string]$_.label })
+    # Running (biggest first), then jailed, then the sleeping rest.
     $show = @($rows | Where-Object { $_.Running } | Sort-Object MB -Descending) +
-            @($rows | Where-Object { -not $_.Running -and $jailed -contains $_.Label })
-    $ui.SetRows(
+            @($rows | Where-Object { -not $_.Running -and $jailed -contains $_.Label }) +
+            @($rows | Where-Object { -not $_.Running -and $jailed -notcontains $_.Label })
+    $ui.SetApps(
         [string[]]@($show | ForEach-Object { $_.Label }),
         [int[]]@($show | ForEach-Object { [int]$_.MB }),
         [bool[]]@($show | ForEach-Object { $_.Enabled }),
         [bool[]]@($show | ForEach-Object { $_.Running }),
-        [bool[]]@($show | ForEach-Object { $jailed -contains $_.Label }))
+        [bool[]]@($show | ForEach-Object { $jailed -contains $_.Label }),
+        [int[]]@($show | ForEach-Object { @($_.Procs).Count }),
+        [string[]]@($show | ForEach-Object {
+            $n = @(@($_.Entry.names) | Where-Object { $_ }) + @(@($_.Entry.paths) | Where-Object { $_ } | ForEach-Object { "anything in $_" })
+            if (@($_.Procs).Count) {
+                $live = @($_.Procs | ForEach-Object { $_.Name } | Select-Object -Unique)
+                ($live -join ', ') + $(if ($n.Count -gt $live.Count) { '  (watching: ' + ($n -join ', ') + ')' } else { '' })
+            } else { $n -join ', ' }
+        }),
+        [string[]]@($show | ForEach-Object { Get-RelaunchSummary $_.Entry }))
+}
+
+function Push-UiSettings {
+    $ui = $script:Ui
+    foreach ($k in $script:Settings.Keys) { $ui.SetSetting($k, [string]$script:Settings[$k]) }
+    $ui.SetSetting('autostart', [string](Test-Autostart))
 }
 
 function Invoke-UiAction([scriptblock]$Action) {
@@ -336,16 +399,80 @@ function Invoke-UiAction([scriptblock]$Action) {
     try { $msg = [string](& $Action) }
     catch { $msg = 'Misfire: ' + $_.Exception.Message; Write-Log ('ui action failed: ' + $_.Exception.Message) }
     if ($ui -and -not $ui.IsDisposed) {
-        Push-UiRows
+        Push-UiApps
         $ui.SetStatus($msg)
         $ui.SetBusy($false)
     }
+}
+
+function Restart-Tray {
+    $argLine = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File "{0}" -Open -WaitPid {1}' -f $PSCommandPath, $PID
+    Start-Process (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $argLine -WindowStyle Hidden
+    if ($script:Ui -and -not $script:Ui.IsDisposed) { $script:Ui.Close() }
+    if ($script:NotifyIcon) { $script:NotifyIcon.Visible = $false }
+    [System.Windows.Forms.Application]::ExitThread()
+}
+
+# Pull the latest release from GitHub. A git clone fast-forwards; a zip install
+# downloads the repo zip and copies only $UpdateFiles. Personal files are never touched.
+function Invoke-SelfUpdate {
+    $ui = $script:Ui
+    $step = { param($p, $m) if ($ui -and -not $ui.IsDisposed) { $ui.SetUpdateProgress($p, $m) }; Wait-Ui 350 }
+    try {
+        & $step 8 'Locating BONK.EXE...'
+        $git = Get-Command git -ErrorAction SilentlyContinue
+        if ($git -and (Test-Path -LiteralPath (Join-Path $AppDir '.git'))) {
+            & $step 35 'git pull --ff-only'
+            $out = & git -C $AppDir pull --ff-only 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) { throw ('git pull failed: ' + $out.Trim()) }
+            & $step 80 'Fast-forwarded. Patching bytes...'
+        } else {
+            $work = Join-Path $env:LOCALAPPDATA 'BonkMode\update'
+            [void][System.IO.Directory]::CreateDirectory($work)
+            $zip = Join-Path $work 'bonk-mode-main.zip'
+            & $step 20 'Downloading the crack...'
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers['User-Agent'] = 'BonkMode'
+            $wc.DownloadFileAsync([Uri]$RepoZip, $zip)
+            while ($wc.IsBusy) { Wait-Ui 50 }
+            & $step 55 'Unpacking...'
+            Expand-Archive -LiteralPath $zip -DestinationPath $work -Force
+            $src = Join-Path $work 'bonk-mode-main'
+            & $step 75 'Patching bytes...'
+            foreach ($f in $UpdateFiles) {
+                $from = Join-Path $src $f
+                if (Test-Path -LiteralPath $from) { Copy-Item -LiteralPath $from -Destination (Join-Path $AppDir $f) -Force }
+            }
+        }
+        & $step 100 'Done. Restarting with the new version...'
+        Write-Log 'update installed, restarting'
+        Wait-Ui 600
+        Restart-Tray
+        'Update installed. Restarting...'
+    } catch {
+        Write-Log ('update failed: ' + $_.Exception.Message)
+        'Update failed: ' + $_.Exception.Message
+    }
+}
+
+function Test-UpdateQuiet {
+    if ($script:Settings.autoUpdate -ne 'True') { return }
+    try {
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers['User-Agent'] = 'BonkMode'
+        $remote = $wc.DownloadString($RawBase + 'VERSION?t=' + [DateTime]::UtcNow.Ticks).Trim()
+        if ([version]$remote -gt [version]$Version -and $script:NotifiedVersion -ne $remote) {
+            $script:NotifiedVersion = $remote
+            Show-Balloon "Bonk Mode v$remote is out" 'Double-click the hammer and open UPDATES (key 5) to install it.'
+        }
+    } catch { }
 }
 
 function New-BonkWindow {
     Import-BonkUi
     $ui = New-Object BonkMode.KeygenForm
     if ($script:NotifyIcon) { $ui.Icon = $script:NotifyIcon.Icon }
+    $ui.SetVersion($Version, $RawBase, $RepoUrl)
     $ui.add_ToggleClicked({
         param($label, $on)
         try {
@@ -355,6 +482,16 @@ function New-BonkWindow {
     })
     $ui.add_BonkClicked({ Invoke-UiAction { Invoke-Bonk -Quiet } })
     $ui.add_ParoleClicked({ Invoke-UiAction { Invoke-Release -Quiet } })
+    $ui.add_BonkOneClicked({ param($label) Invoke-UiAction { Invoke-Bonk -Quiet -Only $label }.GetNewClosure() })
+    $ui.add_ParoleOneClicked({ param($label) Invoke-UiAction { Invoke-Release -Quiet -Only $label }.GetNewClosure() })
+    $ui.add_UpdateClicked({ Invoke-UiAction { Invoke-SelfUpdate } })
+    $ui.add_SettingChanged({
+        param($key, $value)
+        try {
+            if ($key -eq 'autostart') { Set-Autostart ($value -eq 'True') }
+            else { $script:Settings[$key] = $value; Save-Settings }
+        } catch { Write-Log ('setting failed: ' + $_.Exception.Message) }
+    })
     $ui.add_EditClicked({ Start-Process notepad.exe -ArgumentList ('"{0}"' -f $ConfigFile) })
     $ui
 }
@@ -374,7 +511,8 @@ function Open-BonkWindow {
             [System.GC]::Collect()
         })
         $script:Ui = $ui
-        Push-UiRows
+        Push-UiSettings
+        Push-UiApps
         $ui.Show()
         $ui.Activate()
         $script:UiTimer.Start()
@@ -520,22 +658,57 @@ if ($Preview) {
     [void][System.IO.Directory]::CreateDirectory($Preview)
     Import-BonkUi
     [BonkMode.KeygenForm]::NoAudio = $true
-    $script:Ui = New-BonkWindow
-    Push-UiRows
-    $shots = @(@{ name = 'idle'; advance = 2.5; bonk = $false }, @{ name = 'bonk'; advance = 0.6; bonk = $true }, @{ name = 'banner'; advance = 0.35; bonk = $false })
-    foreach ($s in $shots) {
-        if ($s.bonk) { $script:Ui.PreviewBonk() }
-        if ($s.name -eq 'banner') { while ($script:Ui.Busy) { $script:Ui.Advance(0.03) } }
-        $steps = [int]($s.advance / 0.03)
-        for ($i = 0; $i -lt $steps; $i++) { $script:Ui.Advance(0.03) }
-        $bmp = New-Object System.Drawing.Bitmap $script:Ui.ClientSize.Width, $script:Ui.ClientSize.Height
-        $script:Ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height))
-        $file = Join-Path $Preview ('keygen-{0}.png' -f $s.name)
+    $ui = New-BonkWindow
+    $script:Ui = $ui
+    Push-UiSettings
+    $ui.SetSetting('autostart', 'False')
+    # Demo inmates so screenshots never show anyone's real app list.
+    $demo = @(
+        @('Google Chrome', 2310, $false, $true, $false, 24, 'chrome', 'Reopens chrome.exe'),
+        @('Adobe Creative Cloud', 812, $true, $true, $false, 11, 'Creative Cloud, CoreSync, Adobe Desktop Service', 'Nothing to do. It comes back on its own.'),
+        @('Microsoft Teams', 690, $true, $true, $false, 7, 'ms-teams', 'Reopens ms-teams.exe'),
+        @('Discord (voice chat)', 540, $false, $true, $false, 6, 'Discord', 'Reopens Update.exe'),
+        @('OneDrive', 260, $true, $true, $false, 2, 'OneDrive', 'Reopens OneDrive.exe'),
+        @('Microsoft Edge (background)', 410, $true, $true, $false, 9, 'msedge', 'Reopens msedge.exe'),
+        @('Spotify (music)', 330, $false, $true, $false, 5, 'Spotify', 'Reopens spotify:'),
+        @('Razer Synapse', 220, $false, $true, $false, 4, 'RazerAppEngine', 'Reopens the same program.'),
+        @('Windows Widgets / Start feed', 120, $true, $true, $false, 3, 'WidgetBoard, WidgetService', 'Nothing to do. It comes back on its own.'),
+        @('Slack', 0, $true, $false, $true, 0, 'slack', 'Reopens slack.exe'),
+        @('Zoom', 0, $true, $false, $true, 0, 'Zoom', 'Reopens Zoom.exe'),
+        @('Dropbox', 0, $true, $false, $true, 0, 'Dropbox', 'Reopens Dropbox.exe'),
+        @('Phone Link', 0, $true, $false, $true, 0, 'PhoneExperienceHost', 'Nothing to do. It comes back on its own.'),
+        @('Epic Games Launcher', 0, $false, $false, $false, 0, 'EpicGamesLauncher', 'Reopens the same program.')
+    )
+    foreach ($round in 1..6) {
+        $ui.SetApps([string[]]($demo | ForEach-Object { $_[0] }), [int[]]($demo | ForEach-Object { [int]($_[1] * (0.85 + 0.05 * $round)) }),
+            [bool[]]($demo | ForEach-Object { $_[2] }), [bool[]]($demo | ForEach-Object { $_[3] }), [bool[]]($demo | ForEach-Object { $_[4] }),
+            [int[]]($demo | ForEach-Object { $_[5] }), [string[]]($demo | ForEach-Object { $_[6] }), [string[]]($demo | ForEach-Object { $_[7] }))
+    }
+    $changelog = if (Test-Path -LiteralPath (Join-Path $AppDir 'CHANGELOG.md')) { Get-Content -LiteralPath (Join-Path $AppDir 'CHANGELOG.md') -Raw -Encoding UTF8 } else { '' }
+    $ui.PreviewUpdate($Version, $changelog)
+    $run = { param($sec) for ($i = 0; $i -lt [int]($sec / 0.03); $i++) { $ui.Advance(0.03) } }
+    $shoot = {
+        param($name)
+        $bmp = New-Object System.Drawing.Bitmap $ui.ClientSize.Width, $ui.ClientSize.Height
+        $ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height))
+        $file = Join-Path $Preview ('{0}.png' -f $name)
         $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
         $bmp.Dispose()
         $file
     }
-    $script:Ui.Dispose()
+    & $run 2.6; & $shoot 'home'
+    $ui.PreviewBonk(); & $run 0.62; & $shoot 'bonk'
+    while ($ui.Busy) { $ui.Advance(0.03) }
+    & $run 0.35; & $shoot 'jailed'
+    & $run 2.5
+    $ui.ShowScreen(1); & $run 4.2; & $shoot 'cellblock'
+    $ui.ShowScreen(2); & $run 0.5; & $shoot 'dossier'
+    $ui.ShowScreen(3); & $run 0.5; & $shoot 'settings'
+    $ui.ShowScreen(4); & $run 0.5; & $shoot 'updates'
+    $ui.SetUpdateProgress(62, 'Patching bytes...'); & $run 0.4; & $shoot 'patching'
+    $ui.SetUpdateProgress(-1, '')
+    $ui.ShowScreen(5); & $run 1.3; & $shoot 'greetz'
+    $ui.Dispose()
     return
 }
 
@@ -566,8 +739,14 @@ $script:Timer.Start()
 $script:UiTimer = New-Object System.Windows.Forms.Timer
 $script:UiTimer.Interval = 5000
 $script:UiTimer.add_Tick({
-    try { if ($script:Ui -and -not $script:Ui.IsDisposed -and -not $script:Ui.Busy) { Push-UiRows } } catch { Write-Log ('refresh failed: ' + $_.Exception.Message) }
+    try { if ($script:Ui -and -not $script:Ui.IsDisposed -and -not $script:Ui.Busy) { Push-UiApps } } catch { Write-Log ('refresh failed: ' + $_.Exception.Message) }
 })
+
+# Quiet update check: 2 minutes after start, then every 6 hours.
+$script:UpdTimer = New-Object System.Windows.Forms.Timer
+$script:UpdTimer.Interval = 120000
+$script:UpdTimer.add_Tick({ $script:UpdTimer.Interval = 6 * 3600 * 1000; Test-UpdateQuiet })
+$script:UpdTimer.Start()
 
 $script:OpenPoll = New-Object System.Windows.Forms.Timer
 $script:OpenPoll.Interval = 300

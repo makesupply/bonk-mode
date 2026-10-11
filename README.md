@@ -1,48 +1,96 @@
-# 🔨 Bonk Mode
+<div align="center">
 
-**Send your background apps to RAM jail before you game.**
+# 🔨 BONK MODE
 
-You boot up a game. Meanwhile, behind your back, nineteen tray apps are syncing files, checking for updates, rendering widgets nobody asked for, and holding a gigabyte of RAM each "just in case." Bonk Mode is a little hammer in your Windows tray. Click it, hit **BONK 'EM ALL**, and they go to jail. When you're done gaming, grant them parole.
+### A 1999 warez-scene keygen that sends your background apps to **RAM jail**.
 
-```
-🔨  BONK 'EM ALL  (14 apps, ~5.8 GB)
-    Release from RAM jail (0)
-    ───────────────────────────────
-    Running now (checked = gets bonked):
- ✔  Microsoft Edge (background)   1.3 GB
- ✔  OneDrive                      210 MB
-    Discord (voice chat)          1.0 GB
- ✔  Adobe Creative Cloud          790 MB
-    ...
-```
+*Chiptune included. Dignity optional.*
 
-## The keygen
+![Bonk Mode home screen](screenshots/home.png)
 
-Double-click the hammer (or the Start Menu shortcut) and you get a 1999 warez-scene keygen, the kind that came with a chiptune and a scroller:
+**[Install](#-install-in-30-seconds)** · **[Screens](#-the-tour)** · **[Settings](#%EF%B8%8F-settings)** · **[Updates](#-live-updates)** · **[Versions](#-version-history)** · **[FAQ](#-faq-frequently-bonked-questions)**
 
-- **Big dithered ASCII logo** that wobbles over moving copper bars, on a 3D starfield with CRT scanlines.
-- **An NFO "ReLeaSe iNFo" box** that types itself out. It shows targets, RAM to free, the jail count, and a live system RAM bar.
-- **One live square per app**, with RAM that counts up and down every 5 seconds. Click a square to sentence it `[X]` or spare it `[ ]`.
-- **BONK 'EM ALL**: a hammer swings across every sentenced square. Each hit flashes, shakes the screen, sprays RAM bits, pops a comic "BoNK!"/"WHaM!"/"ByE!" burst, and drops prison bars on the square. Then a **RAM JAiLeD!** banner.
-- **PaRoLe**: the bars lift and your apps come home.
-- **Original chiptune** in a Mega Man-ish style (square lead with echo, 16th-note arps, triangle bass, noise drums), synthesized live, plus bonk/slam/parole sound effects. Nothing is downloaded and there are no audio files.
-- **A sine scroller** with the mandatory greetz.
+</div>
 
-Keys: `B` bonk, `P` parole, `M` music, `Esc` close. Drag the window anywhere.
+---
 
-It's cheap to run: a borderless GDI+ window at ~30 fps uses about 7% of one CPU core while it's open. Everything stops when you close it, and the tray goes back to idle.
+## The problem
 
-## What it does
+You have 8 GB of RAM. Maybe 16 if you're lucky. You double-click your game.
 
-- **Bonk.** Every checked app gets a polite close first, the same message as clicking its X. Anything still standing 4 seconds later gets bonked for real.
-- **Parole.** "Release from RAM jail" reopens what the last bonk closed, quietly and in the background where possible. It remembers the roster even if you restart the tray.
-- **Shows you the damage.** The menu lists what's running and how much RAM each app is hogging, sorted biggest first.
-- **You pick the inmates.** Checkboxes in the menu decide who gets bonked. The menu stays open so you can tick a bunch at once, and your picks are saved.
-- **Diplomatic immunity.** Steam, Explorer, your GPU driver, Windows Security, PowerShell, Python and Windows core processes are never touched, even if you put them on the list. Bonk Mode will not bonk your game launcher out from under you.
+Behind your back, **nineteen apps** you forgot existed are syncing files, checking for updates, rendering a weather widget nobody has ever looked at, and each one is holding a gigabyte "just in case." Your game stutters. Your fans scream. Adobe Creative Cloud is thriving.
 
-## Install
+## The solution
 
-Windows 10/11, built-in PowerShell 5.1. Nothing else to install.
+A hammer.
+
+Bonk Mode lives in your system tray. Double-click it and a 1999-style keygen opens, complete with chiptune music, a wobbling ASCII logo and a sine-wave scroller. It shows you **every app eating your RAM**, sorted into **GONNA GET BONKED** and **SPARED**. Hit **BONK 'EM ALL** and a cartoon hammer swings across the screen, smacking each one into a prison cell.
+
+When you're done gaming, grant them **parole** and they come home like nothing happened.
+
+> Built for people on low-RAM laptops, budget gaming rigs, and anyone who has ever opened Task Manager mid-boss-fight and whispered *"who are you people."*
+
+---
+
+## 📸 The tour
+
+### 1 · HOME: know exactly who's about to get bonked
+
+![Home](screenshots/home.png)
+
+Every app on your list gets a card with its **full name**, live RAM, and process count. Cards are grouped under three headers so there's zero guessing:
+
+- 🔴 **GONNA GET BONKED**: closes when you hit the button. Pulsing crosshairs. Visibly nervous. Occasionally sweats.
+- 🟢 **SPARED**: stays open. Your Discord call is safe.
+- ⚪ **IN JAIL**: already bonked, waiting for parole.
+
+**Left-click** a card to sentence or spare it. **Right-click** for its dossier. Hover for the full process list.
+
+### The bonk
+
+![Bonk animation](screenshots/bonk.png)
+
+The hammer goes card by card. Every hit flashes white, shakes the screen, sprays RAM bits everywhere, pops a comic **BONK! / WHAM! / BYE! / K.O.!** burst, and slams prison bars down.
+
+![RAM JAILED](screenshots/jailed.png)
+
+Then the banner tells you how much you freed. Very satisfying. Scientifically proven*.
+
+<sub>*not scientifically proven</sub>
+
+### 2 · CELL BLOCK: visit the inmates
+
+![Cell block](screenshots/cellblock.png)
+
+Every jailed app becomes a **striped inmate** with its initials on its shirt, pacing its cell. They grab the bars and yell things like *"I JUST WANTED TO SYNC!"* and *"CALL MY LAWYER!"* Each has an inmate number and a crime: *"opened a what's-new popup mid-raid"*, *"loitering in the system tray"*, *"resisting closure (X just minimizes)"*.
+
+Click **[PAROLE]** under one cell and that inmate's bars slide open and it sprints off screen. A warden hammer patrols the corridor. If the jail is empty, a tumbleweed rolls by.
+
+### 3 · DOSSIERS: the rap sheet
+
+![Dossier](screenshots/dossier.png)
+
+Every app on your list, running or asleep, filterable by **targets / spared / jailed / sleeping**. Each dossier has a mugshot against a height chart, its live status, every process alias it hides behind, what parole will do to bring it back, its rap sheet, and a **live RAM history chart**. Sentence it, spare it, **BONK NOW** just that one, or parole it from here.
+
+### 4 · SETTINGS
+
+![Settings](screenshots/settings.png)
+
+### 5 · UPDATES: patch center
+
+![Updates](screenshots/updates.png)
+
+### 6 · GREETZ
+
+![Greetz](screenshots/greetz.png)
+
+A plasma background and a spinning 3D cube, because every keygen is legally required to have one.
+
+---
+
+## 🚀 Install in 30 seconds
+
+Windows 10 or 11. Uses the PowerShell that's already on your PC. Nothing else to install.
 
 ```powershell
 git clone https://github.com/makesupply/bonk-mode.git
@@ -50,11 +98,57 @@ cd bonk-mode
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-That adds **Bonk Mode** to your Start Menu and starts the hammer. It might hide in the `^` tray overflow, so drag it out where you can reach it. If you want it waiting for you at login, use "Start with Windows" in the menu.
+No git? Click **Code → Download ZIP** above, unzip anywhere, right-click `install.ps1` → **Run with PowerShell**.
 
-## Make the list yours
+That adds **Bonk Mode** to your Start Menu, puts a 🔨 in your tray (check the `^` overflow and drag it out), and opens the keygen.
 
-The first run copies `bonk-list.example.json` to `bonk-list.json`, which is your personal list (gitignored). Click **Edit bonk list...** in the menu to add apps:
+- **Double-click the hammer** (or the Start Menu shortcut) to open the keygen.
+- **Right-click the hammer** for the quick menu: bonk, parole, and checkboxes without opening anything.
+
+### Keys
+
+| Key | Does |
+|---|---|
+| `1`-`6` | Switch screens |
+| `B` | BONK 'EM ALL |
+| `P` | Parole everyone |
+| `M` | Music on/off |
+| Mouse wheel | Scroll cards, cells, lists, changelog |
+| `Esc` | Close the window (the tray stays) |
+
+---
+
+## 🛡️ What it will never touch
+
+Some processes have **diplomatic immunity**, even if you put them on the list by accident:
+
+Steam and its overlay · Explorer · your GPU driver (NVIDIA containers) · Windows Security / Defender · Windows core processes · PowerShell (it's driving) · Python runtimes (your scripts and agents)
+
+Bonk Mode will not bonk the launcher your game runs on, and it will not bonk Windows.
+
+**How a bonk works:** apps first get a **polite close**, the same message as clicking their X. Browsers save their tabs and chat apps sign off. Anything still standing after the polite warning (4 seconds by default) gets bonked for real. Save your work first. The hammer does not read Word documents.
+
+---
+
+## ⚙️ Settings
+
+Everything is inside the app on screen **4**, and every change saves instantly.
+
+| Setting | What it does |
+|---|---|
+| Music | The chiptune. 100% homemade square waves. |
+| Music volume | 10-step slider, plus a panic 0 button. |
+| Sound FX | Bonks, slams, clicks and parole jingles. |
+| Screen shake | Every bonk rattles the window. |
+| CRT scanlines | For that 1999 monitor glow. |
+| Hammer speed | Fast, normal, or **dramatic**. Dramatic is very dramatic. |
+| Polite warning | 2, 4 or 8 seconds for apps to close nicely before the hammer. |
+| Start with Windows | Hammer in the tray at login. |
+| Check for updates | Looks for a new release on GitHub on open and every 6 hours. |
+
+### Make the list yours
+
+The first run copies `bonk-list.example.json` to your own `bonk-list.json` (never uploaded, never overwritten by updates). Click **[EDIT LIST]** to add any app:
 
 ```json
 { "label": "Some Launcher", "enabled": true, "names": ["SomeLauncher", "SomeLauncherHelper"] }
@@ -62,31 +156,109 @@ The first run copies `bonk-list.example.json` to `bonk-list.json`, which is your
 
 | Field | Meaning |
 |---|---|
-| `names` | Process names without `.exe`. Use Task Manager's Details tab to find them. |
-| `paths` | Optional wildcards on the exe path, e.g. `"*\\Corsair\\*"`, to catch every helper process. |
+| `names` | Process names without `.exe`. Find them in Task Manager → Details. |
+| `paths` | Optional wildcards on the exe path, like `"*\\Corsair\\*"`, to catch every helper. |
 | `enabled` | `true` = gets bonked. |
-| `relaunch` | Leave it out to reopen the same exe on parole. Use `null` for apps that come back on their own. Or give a list of `{ "file": ..., "args": ... }`. Environment variables like `%LOCALAPPDATA%` work. |
+| `relaunch` | Leave it out to reopen the same exe on parole, `null` if the app comes back on its own, or a list of `{ "file": ..., "args": ... }`. `%LOCALAPPDATA%`-style variables work. |
 
-The starter list only checks the obvious freeloaders: cloud sync, chat apps for work, Adobe's tray army, Widgets and so on. Discord, Spotify, browsers, game launchers and peripheral software (iCUE, G HUB, Synapse) are listed but unchecked. Closing those mid-game can kill your voice chat, music, RGB, or mouse DPI, so that call is yours.
+The starter list only sentences the obvious freeloaders: cloud sync, work chat, Adobe's tray army, Widgets, and so on. **Discord, Spotify, browsers, game launchers and mouse/keyboard/RGB software start out SPARED**, because closing them mid-game can kill your voice chat, music, lighting, or mouse DPI. Your call.
 
-## Dry runs
+---
 
-Neither of these closes anything:
+## 🔄 Live updates
+
+Screen **5** is the patch center. It checks this repo, shows you the changelog, and when there's a new version you click **[INSTALL]**, watch a very official-looking hex dump scroll by, and Bonk Mode restarts itself on the new version.
+
+![Patching](screenshots/patching.png)
+
+- **Git clone:** it runs `git pull --ff-only`.
+- **ZIP install:** it downloads the repo ZIP and replaces only the program files.
+- **Never touched:** your `bonk-list.json`, `settings.json`, and jail roster.
+- **Nothing installs without your click.** The tray only shows a notification when a new version is out.
+
+---
+
+## 🪶 Is it heavy?
+
+It's a RAM tool, so it had better not be a RAM hog.
+
+- **Tray only:** idles quietly with one timer per minute.
+- **Keygen open:** a single GDI+ window at ~30 fps, around **7% of one CPU core**. The music is synthesized live from square waves, so there are **no audio files at all**.
+- **Keygen closed:** animation and music stop completely.
+
+The whole app is three text files: a PowerShell script, one C# file compiled on first open (and cached), and a JSON list. No installer, no service, no telemetry, no account, no Electron. *Especially* no Electron.
+
+---
+
+## 🧪 Dry runs
+
+None of these close anything:
 
 ```powershell
-.\bonk-mode.ps1 -ListOnly   # table of the list, what's running, and RAM per app
-.\bonk-mode.ps1 -SelfTest   # builds the real menu and prints what parole would reopen
-.\bonk-mode.ps1 -Preview .\shots   # renders keygen frames (idle, mid-bonk, banner) to PNG
+.\bonk-mode.ps1 -ListOnly          # table of your list, what's running, RAM per app
+.\bonk-mode.ps1 -SelfTest          # builds the tray menu and prints what parole would reopen
+.\bonk-mode.ps1 -Preview .\shots   # renders every keygen screen to PNG (uses demo apps)
 ```
 
-The keygen UI lives in `bonk-ui.cs`. It is compiled on first open and cached in `%LOCALAPPDATA%\BonkMode`, then recompiled automatically if the source changes.
+---
 
-## Honest notes
+## 📜 Version history
 
-- If you have plenty of RAM, the bigger win is usually fewer things waking up the CPU and disk mid-game, not the freed gigabytes themselves. Either way, fewer stutters.
-- Some apps run elevated or have a watchdog that respawns them. If something dodges the bonk, the notification tells you who it was.
-- "Polite close" means apps like browsers get a normal shutdown and restore their tabs. Anything with unsaved work in a window will still ask you about it, and then get bonked 4 seconds later. Save your stuff first.
+### v2.0.0 · The Cell Block Update
+- Six screens in one keygen: **Home, Cell Block, Dossiers, Settings, Updates, Greetz**, with glitch-wipe transitions.
+- Home groups apps under **GONNA GET BONKED / SPARED / IN JAIL** with big readable names.
+- Targets get pulsing crosshairs and nervous sweat.
+- **Cell Block** with pacing, yelling inmates and one-at-a-time parole.
+- **Dossiers** with mugshots, aliases, parole plans, rap sheets and live RAM charts. Bonk or parole a single app.
+- **In-app settings** for music, volume, SFX, shake, scanlines, hammer speed, polite warning, autostart and update checks.
+- **Live updater** that checks GitHub, shows the changelog, installs with one click and restarts itself.
+- A warden hammer, a googly-eyed mascot hammer, a tumbleweed, a plasma and a spinning cube.
 
-## License
+### v1.1.0 · The Keygen
+- Double-click the tray hammer for a 1999-style keygen window.
+- Wobbling dithered ASCII logo, copper bars, starfield, CRT scanlines, typing NFO box.
+- Hammer animation with screen shake, comic bursts, RAM-bit particles and prison bars.
+- Original chiptune and sound effects synthesized live.
 
-MIT. Bonk responsibly.
+### v1.0.0 · First Bonk
+- Tray hammer with BONK 'EM ALL and Release from RAM jail.
+- Polite close first, force close after a few seconds.
+- Kill list in `bonk-list.json` with checkboxes in the tray menu.
+- Diplomatic immunity for Steam, Explorer, the GPU driver and Windows core.
+
+Full notes: [CHANGELOG.md](CHANGELOG.md)
+
+---
+
+## ❓ FAQ (Frequently Bonked Questions)
+
+**Will this make my game faster?**
+If background apps are fighting your game for RAM, CPU or disk, yes, often noticeably on 8-16 GB machines. The biggest win is usually fewer things waking up mid-game to sync, update or show you a popup. If you have 64 GB and nothing running, Bonk Mode will mostly make you feel powerful. That's also valid.
+
+**Something dodged the bonk.**
+Some apps run as administrator or have a watchdog that respawns them. The status line tells you who dodged.
+
+**Is it safe?**
+It only closes what's on your list, it says hello before it hits, and it has a hard-coded immunity list. Read `bonk-mode.ps1`: it's one file.
+
+**Why does it look like that?**
+Because in 1999 every piece of software you shouldn't have downloaded came with the best music ever written, and we miss it.
+
+**Is the music from a real game?**
+No. It's an original tune in the style of 8-bit console music, generated in code every time you open the window.
+
+---
+
+## 💾 Greetz
+
+To RAZOR 1911, FAIRLIGHT, RELOADED, CODEX, SKIDROW, SND, CPY, and every keygen musician who made a 40 KB tracker file slap harder than most albums. This is a love letter to the art, not the piracy. Bonk Mode cracks nothing except your background apps.
+
+No greetz to Adobe Creative Cloud. You know what you did.
+
+---
+
+<div align="center">
+
+**MIT licensed. Bonk responsibly.** 🔨
+
+</div>
