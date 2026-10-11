@@ -2,7 +2,9 @@
 <#
     Bonk Mode - a tray hammer that sends background apps to RAM jail before gaming.
 
-    Left- or right-click the hammer:
+    Double-click the hammer (or launch with -Open) for the keygen window: live
+    squares for every app, click to sentence/spare, BONK 'EM ALL, parole.
+    Right-click the hammer for the quick menu:
       BONK 'EM ALL        politely closes every checked app that is running, then
                           force-closes anything that ignored the hint (after 4s)
       Release from jail   reopens what the last bonk closed (Un-bonk)
@@ -10,10 +12,12 @@
 
     Never touches the protected list below, whatever bonk-list.json says.
 
-    Run with -ListOnly to print the bonk list and what is running, without
-    closing anything.
+    Dry runs that close nothing:
+      -ListOnly           print the bonk list and what is running
+      -SelfTest           build the tray menu and print it
+      -Preview <dir>      render keygen window frames to PNG files
 #>
-param([switch]$ListOnly, [switch]$SelfTest)
+param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview)
 
 $ErrorActionPreference = 'Stop'
 
@@ -25,6 +29,8 @@ $LogFile    = Join-Path $AppDir 'bonk.log'
 $RunKey     = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $RunName    = 'Bonk Mode'
 $MutexName  = 'Local\Bonk_Mode_Tray'
+$OpenEventName = 'Local\Bonk_Mode_Open'
+$UiSource   = Join-Path $AppDir 'bonk-ui.cs'
 $PoliteWaitMs = 4000
 
 # Never bonked: Windows core, the launcher you game from, GPU driver, security,
@@ -73,40 +79,56 @@ function Save-State($Jailed) {
     @{ jailed = @($Jailed) } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $StateFile -Encoding UTF8
 }
 
+# Exe paths are slow to read, so they are cached per process for the live window.
+$script:PathCache = @{}
+
 function Get-Snapshot {
     $session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+    $seen = @{}
+    $out = New-Object System.Collections.ArrayList
     foreach ($p in Get-Process) {
         if ($p.SessionId -ne $session -or $p.Id -eq $PID) { continue }
         if ($Protected -contains $p.ProcessName) { continue }
-        $path = $null
-        try { $path = $p.Path } catch { }
-        [pscustomobject]@{ Proc = $p; Name = $p.ProcessName; Path = $path; WS = $p.WorkingSet64 }
+        $key = '{0}:{1}' -f $p.Id, $p.ProcessName
+        $seen[$key] = $true
+        if ($script:PathCache.ContainsKey($key)) { $path = $script:PathCache[$key] }
+        else { $path = $null; try { $path = $p.Path } catch { }; $script:PathCache[$key] = $path }
+        [void]$out.Add([pscustomobject]@{ Proc = $p; Name = $p.ProcessName; Path = $path; WS = $p.WorkingSet64 })
     }
-}
-
-function Select-EntryProcs($Entry, $Snapshot) {
-    $names = @($Entry.names) | Where-Object { $_ }
-    $paths = @($Entry.paths) | Where-Object { $_ } | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_) }
-    @($Snapshot | Where-Object {
-        $row = $_
-        if ($names -contains $row.Name) { return $true }
-        if ($row.Path) { foreach ($pat in $paths) { if ($row.Path -like $pat) { return $true } } }
-        $false
-    })
+    foreach ($k in @($script:PathCache.Keys)) { if (-not $seen.ContainsKey($k)) { $script:PathCache.Remove($k) } }
+    $out
 }
 
 function Get-Rows {
     $snap = @(Get-Snapshot)
+    $byName = @{}
+    foreach ($row in $snap) {
+        if (-not $byName.ContainsKey($row.Name)) { $byName[$row.Name] = New-Object System.Collections.ArrayList }
+        [void]$byName[$row.Name].Add($row)
+    }
     foreach ($e in @($script:Config.apps)) {
-        $procs = @(Select-EntryProcs $e $snap)
-        $bytes = ($procs | Measure-Object -Property WS -Sum).Sum
+        $hits = New-Object System.Collections.ArrayList
+        $ids = @{}
+        foreach ($n in @($e.names)) {
+            if (-not $n -or -not $byName.ContainsKey($n)) { continue }
+            foreach ($r in $byName[$n]) { if (-not $ids.ContainsKey($r.Proc.Id)) { $ids[$r.Proc.Id] = 1; [void]$hits.Add($r) } }
+        }
+        $paths = @(@($e.paths) | Where-Object { $_ } | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_) })
+        if ($paths.Count) {
+            foreach ($r in $snap) {
+                if (-not $r.Path -or $ids.ContainsKey($r.Proc.Id)) { continue }
+                foreach ($pat in $paths) { if ($r.Path -like $pat) { $ids[$r.Proc.Id] = 1; [void]$hits.Add($r); break } }
+            }
+        }
+        $bytes = 0
+        foreach ($r in $hits) { $bytes += $r.WS }
         [pscustomobject]@{
             Entry   = $e
             Label   = [string]$e.label
             Enabled = [bool]$e.enabled
-            Procs   = $procs
-            Running = ($procs.Count -gt 0)
-            MB      = if ($bytes) { [math]::Round($bytes / 1MB) } else { 0 }
+            Procs   = @($hits)
+            Running = ($hits.Count -gt 0)
+            MB      = [math]::Round($bytes / 1MB)
         }
     }
 }
@@ -193,15 +215,17 @@ function Wait-Ui([int]$Ms) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     while ($sw.ElapsedMilliseconds -lt $Ms) {
         [System.Windows.Forms.Application]::DoEvents()
-        Start-Sleep -Milliseconds 100
+        Start-Sleep -Milliseconds 15   # short, so the keygen window keeps animating
     }
 }
 
-function Invoke-Bonk {
+# Both return a status message; -Quiet skips the tray balloon (the window shows it instead).
+function Invoke-Bonk([switch]$Quiet) {
     $targets = @(Get-Rows | Where-Object { $_.Enabled -and $_.Running })
     if (-not $targets.Count) {
-        Show-Balloon 'Nothing to bonk' 'Every app on the list is already closed. Your RAM is living its best life.'
-        return
+        $msg = 'Nothing to bonk. Your RAM is living its best life.'
+        if (-not $Quiet) { Show-Balloon 'Nothing to bonk' $msg }
+        return $msg
     }
     Set-Tip 'Bonk Mode: BONKING...'
     Write-Log ('BONK: ' + (($targets | ForEach-Object { $_.Label }) -join ', '))
@@ -238,13 +262,17 @@ function Invoke-Bonk {
         $msg += ' Dodged the bonk (probably need admin): ' + ($dodgers -join ', ')
         Write-Log ('dodged: ' + ($dodgers -join ', '))
     }
-    Show-Balloon "BONK! $Hammer" $msg
+    if (-not $Quiet) { Show-Balloon "BONK! $Hammer" $msg }
     Update-Tip
+    $msg
 }
 
-function Invoke-Release {
+function Invoke-Release([switch]$Quiet) {
     $jailed = @(Read-State)
-    if (-not $jailed.Count) { Show-Balloon 'Jail is empty' 'Nobody to release.'; return }
+    if (-not $jailed.Count) {
+        if (-not $Quiet) { Show-Balloon 'Jail is empty' 'Nobody to release.' }
+        return 'Jail is empty. Nobody to release.'
+    }
     $rows = @(Get-Rows)
     $back = @(); $stay = @()
     foreach ($j in $jailed) {
@@ -264,9 +292,96 @@ function Invoke-Release {
     Write-Log ('RELEASE: ' + ($back -join ', '))
     $msg = if ($back.Count) { 'Parole granted: ' + ($back -join ', ') + '.' } else { 'Everyone was already out.' }
     if ($stay.Count) { $msg += ' Comes back on its own or when you open it: ' + ($stay -join ', ') + '.' }
-    Show-Balloon 'Released from RAM jail' $msg
+    if (-not $Quiet) { Show-Balloon 'Released from RAM jail' $msg }
     Wait-Ui 1500
     Update-Tip
+    $msg
+}
+
+# ---------------------------------------------------------------------------
+# Keygen window (bonk-ui.cs, compiled once and cached per source hash)
+# ---------------------------------------------------------------------------
+
+$script:Ui = $null
+
+function Import-BonkUi {
+    if ('BonkMode.KeygenForm' -as [type]) { return }
+    $hash = (Get-FileHash -LiteralPath $UiSource -Algorithm SHA256).Hash.Substring(0, 12)
+    $cacheDir = Join-Path $env:LOCALAPPDATA 'BonkMode'
+    [void][System.IO.Directory]::CreateDirectory($cacheDir)
+    $dll = Join-Path $cacheDir ('bonk-ui-{0}.dll' -f $hash)
+    if (-not (Test-Path -LiteralPath $dll)) {
+        Add-Type -TypeDefinition (Get-Content -LiteralPath $UiSource -Raw -Encoding UTF8) -ReferencedAssemblies System.Windows.Forms, System.Drawing -OutputAssembly $dll -OutputType Library
+    }
+    if (-not ('BonkMode.KeygenForm' -as [type])) { Add-Type -Path $dll }
+}
+
+function Push-UiRows {
+    $ui = $script:Ui
+    if (-not $ui -or $ui.IsDisposed) { return }
+    $rows = @(Get-Rows)
+    $jailed = @(Read-State | ForEach-Object { [string]$_.label })
+    $show = @($rows | Where-Object { $_.Running } | Sort-Object MB -Descending) +
+            @($rows | Where-Object { -not $_.Running -and $jailed -contains $_.Label })
+    $ui.SetRows(
+        [string[]]@($show | ForEach-Object { $_.Label }),
+        [int[]]@($show | ForEach-Object { [int]$_.MB }),
+        [bool[]]@($show | ForEach-Object { $_.Enabled }),
+        [bool[]]@($show | ForEach-Object { $_.Running }),
+        [bool[]]@($show | ForEach-Object { $jailed -contains $_.Label }))
+}
+
+function Invoke-UiAction([scriptblock]$Action) {
+    $ui = $script:Ui
+    try { $msg = [string](& $Action) }
+    catch { $msg = 'Misfire: ' + $_.Exception.Message; Write-Log ('ui action failed: ' + $_.Exception.Message) }
+    if ($ui -and -not $ui.IsDisposed) {
+        Push-UiRows
+        $ui.SetStatus($msg)
+        $ui.SetBusy($false)
+    }
+}
+
+function New-BonkWindow {
+    Import-BonkUi
+    $ui = New-Object BonkMode.KeygenForm
+    if ($script:NotifyIcon) { $ui.Icon = $script:NotifyIcon.Icon }
+    $ui.add_ToggleClicked({
+        param($label, $on)
+        try {
+            $entry = @($script:Config.apps) | Where-Object { $_.label -eq $label } | Select-Object -First 1
+            if ($entry) { $entry.enabled = [bool]$on; Save-Config }
+        } catch { Write-Log ('toggle failed: ' + $_.Exception.Message) }
+    })
+    $ui.add_BonkClicked({ Invoke-UiAction { Invoke-Bonk -Quiet } })
+    $ui.add_ParoleClicked({ Invoke-UiAction { Invoke-Release -Quiet } })
+    $ui.add_EditClicked({ Start-Process notepad.exe -ArgumentList ('"{0}"' -f $ConfigFile) })
+    $ui
+}
+
+function Open-BonkWindow {
+    try {
+        if ($script:Ui -and -not $script:Ui.IsDisposed) {
+            $script:Ui.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+            $script:Ui.Activate()
+            return
+        }
+        $script:Config = Read-Config
+        $ui = New-BonkWindow
+        $ui.add_FormClosed({
+            $script:UiTimer.Stop()
+            $script:Ui = $null
+            [System.GC]::Collect()
+        })
+        $script:Ui = $ui
+        Push-UiRows
+        $ui.Show()
+        $ui.Activate()
+        $script:UiTimer.Start()
+    } catch {
+        Write-Log ('window failed: ' + $_.Exception.Message)
+        Show-Balloon 'Bonk Mode window misfired' $_.Exception.Message 'Error'
+    }
 }
 
 function Test-Autostart { $null -ne (Get-ItemProperty -Path $RunKey -Name $RunName -ErrorAction SilentlyContinue) }
@@ -325,12 +440,13 @@ function Build-Menu {
     try { $script:Config = Read-Config } catch { Write-Log ('config read failed: ' + $_.Exception.Message) }
     $script:Rows = @(Get-Rows)
 
-    $header = New-Object System.Windows.Forms.ToolStripMenuItem 'Bonk Mode - RAM jail warden'
-    $header.Enabled = $false
-    [void]$menu.Items.Add($header)
+    $openItem = New-Object System.Windows.Forms.ToolStripMenuItem 'Open Bonk Mode (keygen)'
+    $openItem.Font = New-Object System.Drawing.Font($menu.Font, [System.Drawing.FontStyle]::Bold)
+    $openItem.add_Click({ Open-BonkWindow })
+    [void]$menu.Items.Add($openItem)
+    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
     $script:BonkItem = New-Object System.Windows.Forms.ToolStripMenuItem 'BONK'
-    $script:BonkItem.Font = New-Object System.Drawing.Font($menu.Font, [System.Drawing.FontStyle]::Bold)
     $script:BonkItem.add_Click({ try { Invoke-Bonk } catch { Write-Log ('bonk failed: ' + $_.Exception.Message); Show-Balloon 'Bonk misfired' $_.Exception.Message 'Error' } })
     [void]$menu.Items.Add($script:BonkItem)
     Update-BonkItem
@@ -399,28 +515,66 @@ if ($SelfTest) {
     return
 }
 
-$createdNew = $false
-$script:Mutex = New-Object System.Threading.Mutex($true, $MutexName, [ref]$createdNew)
-if (-not $createdNew) {
-    [System.Windows.Forms.MessageBox]::Show('Bonk Mode is already in your tray. Look for the hammer.', 'Bonk Mode') | Out-Null
+if ($Preview) {
+    # Render the keygen window to PNGs: idle, mid-bonk, and the jail banner. Nothing closed, no sound.
+    [void][System.IO.Directory]::CreateDirectory($Preview)
+    Import-BonkUi
+    [BonkMode.KeygenForm]::NoAudio = $true
+    $script:Ui = New-BonkWindow
+    Push-UiRows
+    $shots = @(@{ name = 'idle'; advance = 2.5; bonk = $false }, @{ name = 'bonk'; advance = 0.6; bonk = $true }, @{ name = 'banner'; advance = 0.35; bonk = $false })
+    foreach ($s in $shots) {
+        if ($s.bonk) { $script:Ui.PreviewBonk() }
+        if ($s.name -eq 'banner') { while ($script:Ui.Busy) { $script:Ui.Advance(0.03) } }
+        $steps = [int]($s.advance / 0.03)
+        for ($i = 0; $i -lt $steps; $i++) { $script:Ui.Advance(0.03) }
+        $bmp = New-Object System.Drawing.Bitmap $script:Ui.ClientSize.Width, $script:Ui.ClientSize.Height
+        $script:Ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height))
+        $file = Join-Path $Preview ('keygen-{0}.png' -f $s.name)
+        $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+        $bmp.Dispose()
+        $file
+    }
+    $script:Ui.Dispose()
     return
 }
 
-$script:NotifyIcon =New-Object System.Windows.Forms.NotifyIcon
+# Single instance. A second launch (double-clicking the shortcut) asks the
+# running tray to open the window instead.
+$createdNew = $false
+$script:Mutex = New-Object System.Threading.Mutex($true, $MutexName, [ref]$createdNew)
+if (-not $createdNew) {
+    try { [void][System.Threading.EventWaitHandle]::OpenExisting($OpenEventName).Set() }
+    catch { [System.Windows.Forms.MessageBox]::Show('Bonk Mode is already in your tray. Look for the hammer.', 'Bonk Mode') | Out-Null }
+    return
+}
+$script:OpenEvent = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, $OpenEventName)
+
+$script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $script:NotifyIcon.Icon = New-HammerIcon
 $script:NotifyIcon.ContextMenuStrip = $script:Menu
 $script:NotifyIcon.Visible = $true
-$showMenu = [System.Windows.Forms.NotifyIcon].GetMethod('ShowContextMenu', [System.Reflection.BindingFlags]'Instance,NonPublic')
-$script:NotifyIcon.add_MouseUp({
-    param($s, $e)
-    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { $showMenu.Invoke($script:NotifyIcon, $null) }
-})
+$script:NotifyIcon.add_DoubleClick({ Open-BonkWindow })
 Update-Tip
 
 $script:Timer = New-Object System.Windows.Forms.Timer
 $script:Timer.Interval = 60000
 $script:Timer.add_Tick({ Update-Tip })
 $script:Timer.Start()
+
+# Live numbers in the window while it is open.
+$script:UiTimer = New-Object System.Windows.Forms.Timer
+$script:UiTimer.Interval = 5000
+$script:UiTimer.add_Tick({
+    try { if ($script:Ui -and -not $script:Ui.IsDisposed -and -not $script:Ui.Busy) { Push-UiRows } } catch { Write-Log ('refresh failed: ' + $_.Exception.Message) }
+})
+
+$script:OpenPoll = New-Object System.Windows.Forms.Timer
+$script:OpenPoll.Interval = 300
+$script:OpenPoll.add_Tick({ if ($script:OpenEvent.WaitOne(0)) { Open-BonkWindow } })
+$script:OpenPoll.Start()
+
+if ($Open) { Open-BonkWindow }
 
 Write-Log 'tray started'
 try {

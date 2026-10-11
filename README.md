@@ -16,6 +16,22 @@ You boot up a game. Meanwhile, behind your back, nineteen tray apps are syncing 
     ...
 ```
 
+## The keygen
+
+Double-click the hammer (or the Start Menu shortcut) and you get a 1999 warez-scene keygen, the kind that came with a chiptune and a scroller:
+
+- **Big dithered ASCII logo** that wobbles over moving copper bars, on a 3D starfield with CRT scanlines.
+- **An NFO "ReLeaSe iNFo" box** that types itself out. It shows targets, RAM to free, the jail count, and a live system RAM bar.
+- **One live square per app**, with RAM that counts up and down every 5 seconds. Click a square to sentence it `[X]` or spare it `[ ]`.
+- **BONK 'EM ALL**: a hammer swings across every sentenced square. Each hit flashes, shakes the screen, sprays RAM bits, pops a comic "BoNK!"/"WHaM!"/"ByE!" burst, and drops prison bars on the square. Then a **RAM JAiLeD!** banner.
+- **PaRoLe**: the bars lift and your apps come home.
+- **Original chiptune** in a Mega Man-ish style (square lead with echo, 16th-note arps, triangle bass, noise drums), synthesized live, plus bonk/slam/parole sound effects. Nothing is downloaded and there are no audio files.
+- **A sine scroller** with the mandatory greetz.
+
+Keys: `B` bonk, `P` parole, `M` music, `Esc` close. Drag the window anywhere.
+
+It's cheap to run: a borderless GDI+ window at ~30 fps uses about 7% of one CPU core while it's open. Everything stops when you close it, and the tray goes back to idle.
+
 ## What it does
 
 - **Bonk.** Every checked app gets a polite close first, the same message as clicking its X. Anything still standing 4 seconds later gets bonked for real.
@@ -60,7 +76,10 @@ Neither of these closes anything:
 ```powershell
 .\bonk-mode.ps1 -ListOnly   # table of the list, what's running, and RAM per app
 .\bonk-mode.ps1 -SelfTest   # builds the real menu and prints what parole would reopen
+.\bonk-mode.ps1 -Preview .\shots   # renders keygen frames (idle, mid-bonk, banner) to PNG
 ```
+
+The keygen UI lives in `bonk-ui.cs`. It is compiled on first open and cached in `%LOCALAPPDATA%\BonkMode`, then recompiled automatically if the source changes.
 
 ## Honest notes
 
