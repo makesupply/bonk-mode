@@ -1,0 +1,45 @@
+# 🔨 Bonk Mode Roadmap
+
+The mission: **keep your PC fast without you having to think about it.** Find what's hogging the machine, bonk it when performance matters, and put everything back when you're done. Stay fun, and stay light.
+
+This is the plan, not a promise. Order may change. Ideas welcome in [Issues](https://github.com/makesupply/bonk-mode/issues).
+
+## ✅ Shipped
+
+| Version | Name | Highlights |
+|---|---|---|
+| v1.0.0 | First Bonk | Tray hammer, BONK 'EM ALL, parole, immunity list |
+| v1.1.0 | The Keygen | 1999 keygen window, chiptune, hammer animation |
+| v2.0.0 | The Cell Block Update | Six screens, inmates, dossiers, settings, live updater |
+| v2.0.1 | Credit Where Credit Is Due | Apache 2.0 + NOTICE |
+
+## 🔜 Next up
+
+### v2.1.0 · Auto Game Mode
+Start a game and Bonk Mode notices, counts down "bonking in 3...", and clears the room. Quit the game and everyone gets paroled automatically. You'll never have to remember again.
+
+### v2.2.0 · Hog Radar
+A new app starts eating gigabytes? **NEW SUSPECT DETECTED.** One click adds it to your list, or spares it forever. The list maintains itself.
+
+### v2.3.0 · Startup Jail
+See every app that launches when Windows boots and how much it slows you down. Jail the freeloaders from startup. Every change can be undone, and nothing is deleted.
+
+### v2.4.0 · Profiles, CPU and disk
+Gaming, Streaming (keeps Discord and OBS), Work and Battery profiles. CPU and disk hog detection, not just RAM. Optional High Performance power plan while bonked.
+
+### v2.5.0 · Hotkeys, Stream Deck and stats
+`Ctrl+Alt+B` to bonk from inside a game. Command-line switches for Stream Deck buttons. Lifetime stats, achievements, and a hall of shame for repeat offenders.
+
+### v3.0.0 · Signed and verified
+Digitally signed releases, and an updater that refuses anything not signed by us.
+
+## 💭 Someday maybe
+- A community "known hogs" list
+- Bonk on idle or on a schedule
+- Spanish translation
+- Reduced-motion and high-contrast modes
+- winget / Scoop packages
+
+## 🚫 Never
+- **"RAM cleaners" that flush Windows' memory cache.** It makes things slower afterward. Pure placebo.
+- **Bonking Windows services or system processes.** The immunity list is sacred.

@@ -230,7 +230,7 @@ None of these close anything:
 - Kill list in `bonk-list.json` with checkboxes in the tray menu.
 - Diplomatic immunity for Steam, Explorer, the GPU driver and Windows core.
 
-Full notes: [CHANGELOG.md](CHANGELOG.md)
+Full notes: [CHANGELOG.md](CHANGELOG.md) · What's next: **[ROADMAP.md](ROADMAP.md)** (Auto Game Mode, Hog Radar, Startup Jail and more)
 
 ---
 
