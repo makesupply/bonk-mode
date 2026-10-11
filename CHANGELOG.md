@@ -1,5 +1,13 @@
 # Bonk Mode changelog
 
+## v2.3.0 - Startup Jail
+- New STARTUP screen (key 4): every app that launches when you log in, from both Run keys, the 32-bit Run key and both Startup folders, with how heavy it is right now.
+- Click STARTS to jail an app from startup, click JAILED to parole it back. It uses Windows' own StartupApproved switch, the same one Task Manager's Startup tab uses, so nothing is ever deleted and Task Manager shows the same state.
+- Machine-wide (HKLM) entries ask Windows for admin permission for that one change.
+- Windows Security, audio drivers and Bonk Mode itself are immune. Add your own immune entries with startupImmune in bonk-list.json.
+- Seven screens now; the cell block tab is called JAIL.
+- New: -StartupList prints everything that launches at login and its jail state.
+
 ## v2.2.0 - Hog Radar
 - Every 30 seconds Bonk Mode sweeps for heavy apps that are not on your bonk list. Anything over the threshold (400 MB by default) becomes a NEW SUSPECT.
 - Suspects get their own gold section at the top of Home with a radar sweep. [+ LIST] adds one to your bonk list in a click, [SPARE] ignores it forever.

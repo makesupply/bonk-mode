@@ -21,10 +21,11 @@
       -Preview <dir>      render keygen window frames to PNG files
       -GameScan           show game folders and any game running right now
       -Radar              list heavy apps that are not on your bonk list yet
+      -StartupList        list everything that launches at login and its jail state
     Other:
       -UpdateNow          install the latest release without the tray (no restart)
 #>
-param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid, [switch]$GameScan, [string[]]$GameFolder, [switch]$UpdateNow, [switch]$Radar)
+param([switch]$ListOnly, [switch]$SelfTest, [switch]$Open, [string]$Preview, [int]$WaitPid, [switch]$GameScan, [string[]]$GameFolder, [switch]$UpdateNow, [switch]$Radar, [switch]$StartupList)
 
 $ErrorActionPreference = 'Stop'
 
@@ -318,10 +319,108 @@ function Set-SpareForever([string]$Name) {
 }
 
 # ---------------------------------------------------------------------------
+# Startup Jail: stop apps from launching at login using Windows' own
+# StartupApproved flags (the same switch Task Manager's Startup tab flips).
+# Nothing is deleted; paroling flips the flag back.
+# ---------------------------------------------------------------------------
+
+$ApprovedBase = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved'
+$StartupSources = @(
+    @{ Id = 'hkcu-run';   Label = 'HKCU RuN';        Hive = 'HKCU'; Kind = 'reg';    Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run';             Approved = 'Run' },
+    @{ Id = 'hklm-run';   Label = 'HKLM RuN';        Hive = 'HKLM'; Kind = 'reg';    Path = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run';             Approved = 'Run' },
+    @{ Id = 'hklm-run32'; Label = 'HKLM RuN (32)';   Hive = 'HKLM'; Kind = 'reg';    Path = 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'; Approved = 'Run32' },
+    @{ Id = 'user-folder'; Label = 'STaRTuP FoLDeR'; Hive = 'HKCU'; Kind = 'folder'; Path = [Environment]::GetFolderPath('Startup');                             Approved = 'StartupFolder' },
+    @{ Id = 'all-folder'; Label = 'aLL-uSeRS FoLDeR'; Hive = 'HKLM'; Kind = 'folder'; Path = [Environment]::GetFolderPath('CommonStartup');                      Approved = 'StartupFolder' }
+)
+# Security, audio drivers and Bonk Mode itself can't be jailed. Add your own in bonk-list.json "startupImmune".
+$StartupImmune = '(?i)^(SecurityHealth|Windows Defender|RtkAudUService|RTHDVCPL|Bonk Mode|NvBackend|IgfxTray|HotKeysCmds|Persistence)$'
+
+function Get-ExeFromCommand([string]$Command) {
+    if (-not $Command) { return $null }
+    $cmd = [Environment]::ExpandEnvironmentVariables($Command.Trim())
+    if ($cmd.StartsWith('"')) { $end = $cmd.IndexOf('"', 1); if ($end -gt 1) { return $cmd.Substring(1, $end - 1) } }
+    $i = $cmd.IndexOf('.exe', [StringComparison]::OrdinalIgnoreCase)
+    if ($i -gt 0) { return $cmd.Substring(0, $i + 4) }
+    ($cmd -split ' ')[0]
+}
+
+function Get-StartupItems {
+    $immune = @(@($script:Config.startupImmune) | Where-Object { $_ })
+    $running = @{}
+    foreach ($p in Get-Process) { $n = $p.ProcessName.ToLower(); if (-not $running.ContainsKey($n)) { $running[$n] = 0 }; $running[$n] += $p.WorkingSet64 }
+    $shell = $null
+    foreach ($src in $StartupSources) {
+        $approvedKey = '{0}:\{1}\{2}' -f $src.Hive, $ApprovedBase, $src.Approved
+        $approved = Get-ItemProperty -Path $approvedKey -ErrorAction SilentlyContinue
+        $entries = @()
+        if ($src.Kind -eq 'reg') {
+            $props = Get-ItemProperty -Path $src.Path -ErrorAction SilentlyContinue
+            if ($props) { $entries = @($props.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object { @{ Name = $_.Name; Command = [string]$_.Value } }) }
+        } elseif ($src.Path -and (Test-Path -LiteralPath $src.Path)) {
+            foreach ($file in Get-ChildItem -LiteralPath $src.Path -File -ErrorAction SilentlyContinue) {
+                if ($file.Name -ieq 'desktop.ini') { continue }
+                $cmd = $file.FullName
+                if ($file.Extension -ieq '.lnk') {
+                    try { if (-not $shell) { $shell = New-Object -ComObject WScript.Shell }; $l = $shell.CreateShortcut($file.FullName); $cmd = ('"{0}" {1}' -f $l.TargetPath, $l.Arguments).Trim() } catch { }
+                }
+                $entries += @{ Name = $file.Name; Command = $cmd }
+            }
+        }
+        foreach ($e in $entries) {
+            $flag = $null
+            if ($approved -and $approved.PSObject.Properties[$e.Name]) { $flag = $approved.($e.Name) }
+            $enabled = -not ($flag -and $flag.Length -gt 0 -and ($flag[0] % 2) -eq 1)
+            $exe = Get-ExeFromCommand $e.Command
+            $exeName = if ($exe) { [IO.Path]::GetFileNameWithoutExtension($exe).ToLower() } else { '' }
+            $isImmune = ($e.Name -match $StartupImmune) -or ($immune -contains $e.Name) -or
+                        ($exe -and $exe.StartsWith($env:windir, [StringComparison]::OrdinalIgnoreCase) -and $e.Name -notmatch '\.(lnk|url)$' -and $exeName -notin @('wscript', 'cscript', 'powershell', 'cmd', 'rundll32'))
+            [pscustomobject]@{
+                Key      = '{0}|{1}' -f $src.Id, $e.Name
+                Name     = $e.Name
+                Source   = $src.Label
+                Hive     = $src.Hive
+                Approved = $approvedKey
+                Command  = $e.Command
+                Enabled  = $enabled
+                Immune   = [bool]$isImmune
+                MB       = if ($exeName -and $exeName -notin @('wscript', 'cscript', 'powershell', 'pwsh', 'cmd', 'rundll32') -and $running.ContainsKey($exeName)) { [int][math]::Round($running[$exeName] / 1MB) } else { 0 }
+            }
+        }
+    }
+}
+
+function Set-StartupItem([string]$Key, [bool]$Enable) {
+    $item = @(Get-StartupItems) | Where-Object { $_.Key -eq $Key } | Select-Object -First 1
+    if (-not $item) { throw "startup item not found: $Key" }
+    if ($item.Immune) { throw "$($item.Name) is immune" }
+    # 12 bytes: 02 = enabled, 03 = disabled + the time it was disabled (FILETIME), exactly like Task Manager.
+    $bytes = New-Object byte[] 12
+    if ($Enable) { $bytes[0] = 2 } else { $bytes[0] = 3; [BitConverter]::GetBytes([DateTime]::Now.ToFileTime()).CopyTo($bytes, 4) }
+    if ($item.Hive -eq 'HKCU') {
+        if (-not (Test-Path -LiteralPath $item.Approved)) { New-Item -Path $item.Approved -Force | Out-Null }
+        Set-ItemProperty -LiteralPath $item.Approved -Name $item.Name -Value $bytes -Type Binary
+    } else {
+        # Machine-wide entries need admin: Windows shows its own permission prompt for this one change.
+        $hex = ($bytes | ForEach-Object { '0x{0:X2}' -f $_ }) -join ','
+        $cmd = "New-Item -Path '{0}' -Force -ErrorAction SilentlyContinue | Out-Null; Set-ItemProperty -LiteralPath '{0}' -Name '{1}' -Value ([byte[]]@({2})) -Type Binary" -f $item.Approved.Replace("'", "''"), $item.Name.Replace("'", "''"), $hex
+        $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+        $p = Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -WindowStyle Hidden -EncodedCommand $enc" -WindowStyle Hidden -PassThru -Wait
+        if ($p.ExitCode -ne 0) { throw "admin change was cancelled or failed" }
+    }
+    Write-Log ('startup {0}: {1} ({2})' -f $(if ($Enable) { 'paroled' } else { 'jailed' }), $item.Name, $item.Source)
+}
+
+# ---------------------------------------------------------------------------
 # -ListOnly: report and exit, nothing is closed.
 # ---------------------------------------------------------------------------
 
 $script:Config = Read-Config
+
+if ($StartupList) {
+    'Startup Jail: apps that launch at login'
+    @(Get-StartupItems) | Sort-Object Source, Name | Format-Table @{ n = 'State'; e = { if ($_.Immune) { 'IMMUNE' } elseif ($_.Enabled) { 'starts' } else { 'JAILED' } } }, Name, Source, @{ n = 'RAM now'; e = { if ($_.MB) { '{0} MB' -f $_.MB } else { '' } } } -AutoSize | Out-String -Width 200
+    return
+}
 
 if ($Radar) {
     'Hog Radar (threshold {0} MB, not on your list, not Windows, not spared):' -f $script:Settings.radarMB
@@ -629,7 +728,7 @@ function Test-UpdateQuiet {
         $remote = $wc.DownloadString($RawBase + 'VERSION?t=' + [DateTime]::UtcNow.Ticks).Trim()
         if ([version]$remote -gt [version]$Version -and $script:NotifiedVersion -ne $remote) {
             $script:NotifiedVersion = $remote
-            Show-Balloon "Bonk Mode v$remote is out" 'Double-click the hammer and open UPDATES (key 5) to install it.'
+            Show-Balloon "Bonk Mode v$remote is out" 'Double-click the hammer and open UPDATES (key 6) to install it.'
         }
     } catch { }
 }
@@ -744,8 +843,16 @@ function Invoke-RadarTick {
     } catch { Write-Log ('radar failed: ' + $_.Exception.Message) }
 }
 
-function New-BonkWindow {
-    Import-BonkUi
+function Push-UiStartup {
+    if (-not $script:Ui -or $script:Ui.IsDisposed) { return }
+    $items = @(Get-StartupItems | Sort-Object @{ e = { $_.Immune } }, @{ e = { -$_.MB } }, Name)
+    $script:Ui.SetStartup([string[]]@($items | ForEach-Object { $_.Key }), [string[]]@($items | ForEach-Object { $_.Name }),
+        [string[]]@($items | ForEach-Object { $_.Source }), [string[]]@($items | ForEach-Object { [string]$_.Command }),
+        [bool[]]@($items | ForEach-Object { $_.Enabled }), [bool[]]@($items | ForEach-Object { $_.Immune }),
+        [int[]]@($items | ForEach-Object { $_.MB }), [bool[]]@($items | ForEach-Object { $_.Hive -eq 'HKLM' }))
+}
+
+function New-BonkWindow {    Import-BonkUi
     $ui = New-Object BonkMode.KeygenForm
     if ($script:NotifyIcon) { $ui.Icon = $script:NotifyIcon.Icon }
     $ui.SetVersion($Version, $RawBase, $RepoUrl)
@@ -771,6 +878,12 @@ function New-BonkWindow {
     })
     $ui.add_EditClicked({ Start-Process notepad.exe -ArgumentList ('"{0}"' -f $ConfigFile) })
     $ui.add_GameCancelClicked({ Stop-GameCountdown })
+    $ui.add_StartupRefresh({ try { Push-UiStartup; $script:Ui.SetStatus('startup list refreshed.') } catch { Write-Log ('startup refresh failed: ' + $_.Exception.Message) } })
+    $ui.add_StartupToggle({
+        param($key, $enable)
+        $msg = try { Set-StartupItem $key $enable; $n = $key.Substring($key.IndexOf('|') + 1); if ($enable) { "$n will launch at login again." } else { "$n is jailed from startup. Faster boot unlocked." } } catch { 'Startup change failed: ' + $_.Exception.Message }
+        if ($script:Ui -and -not $script:Ui.IsDisposed) { Push-UiStartup; $script:Ui.SetStatus($msg); $script:Ui.SetBusy($false) }
+    })
     $ui.add_SuspectAction({
         param($name, $action)
         try {
@@ -803,6 +916,7 @@ function Open-BonkWindow {
         Push-UiSettings
         Push-UiApps
         Push-UiSuspects
+        Push-UiStartup
         Update-UiGame
         $ui.Show()
         $ui.Activate()
@@ -999,6 +1113,12 @@ if ($Preview) {
             [int[]]($demo | ForEach-Object { $_[5] }), [string[]]($demo | ForEach-Object { $_[6] }), [string[]]($demo | ForEach-Object { $_[7] }))
     }
     $ui.SetSuspects([string[]]@('GameBoostPro', 'WeatherWidgetPlus'), [string[]]@('GameBoost Pro (totally legit)', 'Weather Widget Plus'), [int[]]@(940, 455), [int[]]@(3, 1))
+    $ui.SetStartup([string[]]@('hkcu-run|Steam', 'hkcu-run|Discord', 'hklm-run32|Adobe Creative Cloud', 'user-folder|Spotify.lnk', 'hkcu-run|GameBoostPro', 'hklm-run|SecurityHealth', 'hkcu-run|Teams', 'hkcu-run|OneDrive'),
+        [string[]]@('Steam', 'Discord', 'Adobe Creative Cloud', 'Spotify.lnk', 'GameBoostPro', 'SecurityHealth', 'Teams', 'OneDrive'),
+        [string[]]@('HKCU RuN', 'HKCU RuN', 'HKLM RuN (32)', 'STaRTuP FoLDeR', 'HKCU RuN', 'HKLM RuN', 'HKCU RuN', 'HKCU RuN'),
+        [string[]]@('steam.exe -silent', 'Update.exe --processStart Discord.exe', 'Creative Cloud.exe --showwindow=false', 'Spotify.exe --minimized', 'GameBoostPro.exe /tray', 'SecurityHealthSystray.exe', 'ms-teams.exe msteams:system-initiated', 'OneDrive.exe /background'),
+        [bool[]]@($true, $true, $false, $true, $false, $true, $false, $true), [bool[]]@($false, $false, $false, $false, $false, $true, $false, $false),
+        [int[]]@(221, 540, 0, 330, 0, 14, 0, 260), [bool[]]@($false, $false, $true, $false, $false, $true, $false, $false))
     $changelog = if (Test-Path -LiteralPath (Join-Path $AppDir 'CHANGELOG.md')) { Get-Content -LiteralPath (Join-Path $AppDir 'CHANGELOG.md') -Raw -Encoding UTF8 } else { '' }
     $ui.PreviewUpdate($Version, $changelog)
     $run = { param($sec) for ($i = 0; $i -lt [int]($sec / 0.03); $i++) { $ui.Advance(0.03) } }
@@ -1021,11 +1141,12 @@ if ($Preview) {
     & $run 2.5
     $ui.ShowScreen(1); & $run 4.2; & $shoot 'cellblock'
     $ui.ShowScreen(2); & $run 0.5; & $shoot 'dossier'
-    $ui.ShowScreen(3); & $run 0.5; & $shoot 'settings'
-    $ui.ShowScreen(4); & $run 0.5; & $shoot 'updates'
+    $ui.ShowScreen(3); & $run 1.0; & $shoot 'startup'
+    $ui.ShowScreen(4); & $run 0.5; & $shoot 'settings'
+    $ui.ShowScreen(5); & $run 0.5; & $shoot 'updates'
     $ui.SetUpdateProgress(62, 'Patching bytes...'); & $run 0.4; & $shoot 'patching'
     $ui.SetUpdateProgress(-1, '')
-    $ui.ShowScreen(5); & $run 1.3; & $shoot 'greetz'
+    $ui.ShowScreen(6); & $run 1.3; & $shoot 'greetz'
     $ui.Dispose()
     return
 }

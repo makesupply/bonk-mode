@@ -14,11 +14,9 @@ This is the plan, not a promise. Order may change. Ideas welcome in [Issues](htt
 | v2.0.1 | Credit Where Credit Is Due | Apache 2.0 + NOTICE |
 | v2.1.0 | Auto Game Mode | Bonks when a game starts, paroles when it quits |
 | v2.2.0 | Hog Radar | Flags heavy apps that are not on your list yet |
+| v2.3.0 | Startup Jail | Stop apps from launching at login, fully reversible |
 
 ## 🔜 Next up
-
-### v2.3.0 · Startup Jail
-See every app that launches when Windows boots and how much it slows you down. Jail the freeloaders from startup. Every change can be undone, and nothing is deleted.
 
 ### v2.4.0 · Profiles, CPU and disk
 Gaming, Streaming (keeps Discord and OBS), Work and Battery profiles. CPU and disk hog detection, not just RAM. Optional High Performance power plan while bonked.

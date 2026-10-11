@@ -88,15 +88,23 @@ Click **[PAROLE]** under one cell and that inmate's bars slide open and it sprin
 
 Every app on your list, running or asleep, filterable by **targets / spared / jailed / sleeping**. Each dossier has a mugshot against a height chart, its live status, every process alias it hides behind, what parole will do to bring it back, its rap sheet, and a **live RAM history chart**. Sentence it, spare it, **BONK NOW** just that one, or parole it from here.
 
-### 4 · SETTINGS
+### 4 · STARTUP JAIL: faster boot, every day
+
+![Startup jail](screenshots/startup.png)
+
+Every app that launches when you log in, from the registry Run keys and the Startup folders, with how heavy it is right now. Click **STARTS** to jail it from startup and **JAILED** to parole it back.
+
+It flips Windows' own StartupApproved switch, the same one Task Manager's Startup tab uses. Nothing is deleted, Task Manager shows the same state, and you can undo anything. Machine-wide entries ask Windows for admin permission first. Windows Security, audio drivers and Bonk Mode itself are immune, and you can make anything else immune with `startupImmune` in your `bonk-list.json`.
+
+### 5 · SETTINGS
 
 ![Settings](screenshots/settings.png)
 
-### 5 · UPDATES: patch center
+### 6 · UPDATES: patch center
 
 ![Updates](screenshots/updates.png)
 
-### 6 · GREETZ
+### 7 · GREETZ
 
 ![Greetz](screenshots/greetz.png)
 
@@ -125,7 +133,7 @@ That adds **Bonk Mode** to your Start Menu, puts a 🔨 in your tray (check the 
 
 | Key | Does |
 |---|---|
-| `1`-`6` | Switch screens |
+| `1`-`7` | Switch screens |
 | `B` | BONK 'EM ALL |
 | `P` | Parole everyone |
 | `M` | Music on/off |
@@ -148,7 +156,7 @@ Bonk Mode will not bonk the launcher your game runs on, and it will not bonk Win
 
 ## ⚙️ Settings
 
-Everything is inside the app on screen **4**, and every change saves instantly.
+Everything is inside the app on screen **5**, and every change saves instantly.
 
 | Setting | What it does |
 |---|---|
@@ -186,7 +194,7 @@ The starter list only sentences the obvious freeloaders: cloud sync, work chat, 
 
 ## 🔄 Live updates
 
-Screen **5** is the patch center. It checks this repo, shows you the changelog, and when there's a new version you click **[INSTALL]**, watch a very official-looking hex dump scroll by, and Bonk Mode restarts itself on the new version.
+Screen **6** is the patch center. It checks this repo, shows you the changelog, and when there's a new version you click **[INSTALL]**, watch a very official-looking hex dump scroll by, and Bonk Mode restarts itself on the new version.
 
 ![Patching](screenshots/patching.png)
 
@@ -219,11 +227,16 @@ None of these close anything:
 .\bonk-mode.ps1 -Preview .\shots   # renders every keygen screen to PNG (uses demo apps)
 .\bonk-mode.ps1 -GameScan          # which game folders are watched, and is a game running now
 .\bonk-mode.ps1 -Radar             # heavy apps that are not on your list yet
+.\bonk-mode.ps1 -StartupList       # everything that launches at login, and its jail state
 ```
 
 ---
 
 ## 📜 Version history
+
+### v2.3.0 · Startup Jail
+- New Startup screen: jail apps from launching at login with Windows' own switch. Nothing deleted, fully reversible.
+- Admin entries ask Windows first; security and audio drivers are immune.
 
 ### v2.2.0 · Hog Radar
 - Sweeps for heavy apps that aren't on your list and flags them as NEW SUSPECTS with one-click add or spare-forever.

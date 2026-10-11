@@ -368,6 +368,14 @@ namespace BonkMode
         public bool Escaping, Fire, Fired;
     }
 
+    public class StartItem
+    {
+        public string Key, Name, Source, Command;
+        public bool Enabled, Immune, Admin, Pending;
+        public int MB;
+        public float Bars;
+    }
+
     class Particle { public float X, Y, VX, VY, Life; public string C; public Color Col; }
     class Pop { public float X, Y, Age; public string Text; }
     class Star { public float X, Y, Z; }
@@ -395,6 +403,8 @@ namespace BonkMode
         public event Action<string, string> SettingChanged;
         public event Action GameCancelClicked;
         public event Action<string, string> SuspectAction;
+        public event Action<string, bool> StartupToggle;
+        public event Action StartupRefresh;
 
         public static bool NoAudio;
 
@@ -411,7 +421,8 @@ namespace BonkMode
         static readonly Color DimGreen = Color.FromArgb(0, 110, 55);
         static readonly Color Red = Color.FromArgb(255, 60, 60);
         static readonly Color Gold = Color.FromArgb(255, 210, 0);
-        static readonly string[] TabNames = { "HoMe", "CeLL BLoCK", "DoSSieRS", "SeTTiNGS", "uPDaTeS", "GReeTZ" };
+        static readonly string[] TabNames = { "HoMe", "JaiL", "DoSSieRS", "STaRTuP", "SeTTiNGS", "uPDaTeS", "GReeTZ" };
+        const int ScrHome = 0, ScrJail = 1, ScrDossier = 2, ScrStartup = 3, ScrSettings = 4, ScrUpdates = 5, ScrGreetz = 6;
         static readonly string[] PopWords = { "BoNK!", "WHaM!", "SMaSH!", "BoNK!", "K.O.!", "ByE!", "BoNK!", "PoW!", "CLaNK!" };
         static readonly string[] Bubbles = {
             "LeT Me ouT!", "i JuST WaNTeD To SYNC!", "1 MoRe uPDaTe...", "i KNoW MY RiGHTS!", "CaLL MY LaWYeR!",
@@ -492,7 +503,8 @@ namespace BonkMode
         int updPct = -1;
         string updMsg = "";
         string gameStatus = "aSK :: WaTCHiNG";
-        int settingsScroll;
+        int settingsScroll, startScroll, startJailed;
+        readonly List<StartItem> startItems = new List<StartItem>();
 
         public KeygenForm()
         {
@@ -532,7 +544,7 @@ namespace BonkMode
                 "VISIT THE CELL BLOCK AND GRANT PAROLE ONE INMATE AT A TIME ...   THE UPDATER PULLS FRESH CRACKS STRAIGHT FROM GITHUB ...   " +
                 "STEAM, YOUR GPU DRIVER AND WINDOWS HAVE DIPLOMATIC IMMUNITY ...   " +
                 "GREETZ FLY OUT TO RAZOR 1911, FAIRLIGHT, RELOADED, CODEX, SKIDROW, SND, CPY AND EVERY KEYGEN MUSICIAN WHO MADE A 40KB TRACKER FILE SLAP ...   " +
-                "NO GREETZ TO ADOBE CREATIVE CLOUD, YOU KNOW WHAT YOU DID ...   BONK MODE IS OPEN SOURCE UNDER APACHE 2.0, FORKS MUST CREDIT GITHUB.COM/MAKESUPPLY/BONK-MODE ...   [1-6] SCREENS  [B] BONK  [P] PAROLE  [M] MUSIC  [ESC] EXIT ...   ";
+                "NO GREETZ TO ADOBE CREATIVE CLOUD, YOU KNOW WHAT YOU DID ...   BONK MODE IS OPEN SOURCE UNDER APACHE 2.0, FORKS MUST CREDIT GITHUB.COM/MAKESUPPLY/BONK-MODE ...   [1-7] SCREENS  [B] BONK  [P] PAROLE  [M] MUSIC  [ESC] EXIT ...   ";
             using (Graphics g = CreateGraphics())
                 charW = g.MeasureString("MMMMMMMMMM", fScroll, PointF.Empty, StringFormat.GenericTypographic).Width / 10f;
             scrollX = W;
@@ -575,6 +587,23 @@ namespace BonkMode
 
         public void SetGameStatus(string s) { gameStatus = s ?? ""; }
 
+        public void SetStartup(string[] keys, string[] names, string[] sources, string[] commands, bool[] enabled, bool[] immune, int[] mb, bool[] admin)
+        {
+            Dictionary<string, StartItem> old = new Dictionary<string, StartItem>();
+            foreach (StartItem x in startItems) old[x.Key] = x;
+            startItems.Clear();
+            startJailed = 0;
+            for (int i = 0; i < keys.Length; i++)
+            {
+                StartItem s;
+                if (!old.TryGetValue(keys[i], out s)) { s = new StartItem(); s.Key = keys[i]; s.Bars = enabled[i] ? 0 : 1; }
+                s.Name = names[i]; s.Source = sources[i]; s.Command = commands[i]; s.Enabled = enabled[i];
+                s.Immune = immune[i]; s.MB = mb[i]; s.Admin = admin[i]; s.Pending = false;
+                if (!s.Enabled && !s.Immune) startJailed++;
+                startItems.Add(s);
+            }
+        }
+
         public void ShowGameBanner(string game)
         {
             bannerText = "GaMe oN!"; bannerSub = Leet(game + " detected. clearing the room."); bannerT = 0;
@@ -582,7 +611,7 @@ namespace BonkMode
             Play(sfxFanfare);
         }
 
-        public void ShowScreen(int s) { screen = Math.Max(0, Math.Min(5, s)); transT = 0; }
+        public void ShowScreen(int s) { screen = Math.Max(0, Math.Min(TabNames.Length - 1, s)); transT = 0; }
 
         public void PreviewBonk() { StartBonk(null, false); }
 
@@ -691,6 +720,7 @@ namespace BonkMode
             for (int i = pops.Count - 1; i >= 0; i--) { pops[i].Age += fdt; if (pops[i].Age > 0.75f) pops.RemoveAt(i); }
             if (bannerT >= 0) { bannerT += dt; if (bannerT > 2.2) bannerT = -1; }
             if (radarPing >= 0) { radarPing += dt; if (radarPing > 3) radarPing = -1; }
+            foreach (StartItem s in startItems) { if (!s.Enabled && !s.Immune) s.Bars = Math.Min(1, s.Bars + fdt * 3); else s.Bars = Math.Max(0, s.Bars - fdt * 3); }
             shake = Math.Max(0, shake - fdt * 2.5f);
             scrollX -= dt * 140;
             if (scrollX < -scrollText.Length * charW) scrollX = W;
@@ -1060,9 +1090,10 @@ namespace BonkMode
             int d = -e.Delta / 120 * 50;
             if (screen == 0) homeScroll += d;
             else if (screen == 1) jailScroll += d;
-            else if (screen == 2 && e.X < 480) appsScroll += d / 2;
-            else if (screen == 4) logScroll += d / 2;
-            else if (screen == 3) settingsScroll += d;
+            else if (screen == ScrDossier && e.X < 480) appsScroll += d / 2;
+            else if (screen == ScrUpdates) logScroll += d / 2;
+            else if (screen == ScrSettings) settingsScroll += d;
+            else if (screen == ScrStartup) startScroll += d / 2;
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -1072,8 +1103,8 @@ namespace BonkMode
             else if (e.KeyCode == Keys.M) ChangeSetting("music", IsTrue(settings["music"]) ? "False" : "True");
             else if (e.KeyCode == Keys.B) StartBonk(null, true);
             else if (e.KeyCode == Keys.P) StartParoleAll();
-            else if (e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D6) Go(e.KeyCode - Keys.D1);
-            else if (e.KeyCode >= Keys.NumPad1 && e.KeyCode <= Keys.NumPad6) Go(e.KeyCode - Keys.NumPad1);
+            else if (e.KeyCode >= Keys.D1 && e.KeyCode < Keys.D1 + TabNames.Length) Go(e.KeyCode - Keys.D1);
+            else if (e.KeyCode >= Keys.NumPad1 && e.KeyCode < Keys.NumPad1 + TabNames.Length) Go(e.KeyCode - Keys.NumPad1);
         }
 
         void HandleClick(string id, MouseButtons button)
@@ -1091,7 +1122,7 @@ namespace BonkMode
             {
                 AppInfo a = Find(id.Substring(5));
                 if (a == null) return;
-                if (button == MouseButtons.Right) { selected = a.Label; filter = "all"; Go(2); Play(sfxBlip); }
+                if (button == MouseButtons.Right) { selected = a.Label; filter = "all"; Go(ScrDossier); Play(sfxBlip); }
                 else if (a.Jailed) { selected = a.Label; Go(1); }
                 else ToggleApp(a);
                 return;
@@ -1126,6 +1157,23 @@ namespace BonkMode
                 if (add && shakeOn) shake = 0.3f;
                 status = Leet(add ? "added to the bonk list: " + (s != null ? s.Label : proc) : "spared forever: " + (s != null ? s.Label : proc));
                 if (SuspectAction != null) SuspectAction(proc, add ? "add" : "spare");
+                return;
+            }
+            if (id == "startup-refresh") { Play(sfxBlip); if (StartupRefresh != null) StartupRefresh(); return; }
+            if (id.StartsWith("startup:"))
+            {
+                if (Busy) return;
+                string key = id.Substring(8);
+                StartItem s = null;
+                foreach (StartItem x in startItems) if (x.Key == key) s = x;
+                if (s == null || s.Immune) return;
+                bool enable = !s.Enabled;
+                s.Pending = true;
+                Play(enable ? sfxParole : sfxSlam);
+                if (!enable && shakeOn) shake = 0.35f;
+                status = Leet((enable ? "paroling " : "jailing ") + s.Name + (enable ? " back into startup..." : " from startup...") + (s.Admin ? " (windows will ask for admin)" : ""));
+                busy = true;
+                if (StartupToggle != null) StartupToggle(key, enable);
                 return;
             }
             if (id == "gamecancel") { Play(sfxClick); if (GameCancelClicked != null) GameCancelClicked(); return; }
@@ -1219,11 +1267,12 @@ namespace BonkMode
                 DrawNav(g);
                 switch (screen)
                 {
-                    case 0: DrawHome(g); break;
-                    case 1: DrawJail(g); break;
-                    case 2: DrawDossier(g); break;
-                    case 3: DrawSettings(g); break;
-                    case 4: DrawUpdates(g); break;
+                    case ScrHome: DrawHome(g); break;
+                    case ScrJail: DrawJail(g); break;
+                    case ScrDossier: DrawDossier(g); break;
+                    case ScrStartup: DrawStartup(g); break;
+                    case ScrSettings: DrawSettings(g); break;
+                    case ScrUpdates: DrawUpdates(g); break;
                     default: DrawGreetz(g); break;
                 }
                 DrawHammer(g);
@@ -1334,18 +1383,20 @@ namespace BonkMode
 
         void DrawNav(Graphics g)
         {
-            for (int i = 0; i < 6; i++)
+            int n = TabNames.Length, tw = (920 - (n - 1) * 8) / n;
+            for (int i = 0; i < n; i++)
             {
-                Rectangle r = new Rectangle(20 + i * 155, 124, 145, 24);
+                Rectangle r = new Rectangle(20 + i * (tw + 8), 124, tw, 24);
                 string id = "tab:" + i;
                 string label = (i + 1) + " " + TabNames[i];
-                if (i == 1 && jailCount > 0) label += " (" + jailCount + ")";
-                bool alert = i == 4 && updAvailable && (int)(t * 3) % 2 == 0;
+                if (i == ScrJail && jailCount > 0) label += " (" + jailCount + ")";
+                if (i == ScrStartup && startJailed > 0) label += " (" + startJailed + ")";
+                bool alert = i == ScrUpdates && updAvailable && (int)(t * 3) % 2 == 0;
                 bool active = screen == i;
                 Color bg = active ? Green : Hot(id) ? Color.FromArgb(0, 70, 35) : alert ? Color.FromArgb(120, 90, 0) : Color.FromArgb(0, 0, 0);
                 g.FillRectangle(B(bg), r);
                 g.DrawRectangle(P(active ? Green : DimGreen), r.X, r.Y, r.Width - 1, r.Height - 1);
-                g.DrawString(label + (i == 4 && updAvailable ? " !" : ""), fNfoB, B(active ? Color.Black : alert ? Color.Black : Green), r, sfCenter);
+                g.DrawString(label + (i == ScrUpdates && updAvailable ? " !" : ""), fNfoB, B(active ? Color.Black : alert ? Color.Black : Green), r, sfCenter);
                 Zone(r, id);
             }
         }
@@ -1900,6 +1951,69 @@ namespace BonkMode
 
         // ------------------------------------------------------------ screen 4: settings
 
+        void DrawStartup(Graphics g)
+        {
+            int total = startItems.Count;
+            string head = "STaRTuP JaiL  ::  " + total + " aPPS LauNCH aT LoGiN  ::  " + startJailed + " JaiLeD  ::  FeWeR = FaSTeR BooT";
+            g.DrawString(head, fNfoB, B(Gold), new RectangleF(20, 158, W - 40, 20), sfCenter);
+            Rectangle area = new Rectangle(20, 184, W - 40, 398);
+            g.FillRectangle(B(Color.FromArgb(200, 0, 0, 0)), area);
+            g.DrawRectangle(P(DimGreen), area);
+            const int rh = 36;
+            float contentH = total * rh + 4;
+            startScroll = Clamp(startScroll, 0, Math.Max(0, (int)contentH - area.Height));
+            if (total == 0) g.DrawString(Leet("reading your startup apps..."), fNfo, B(Color.Gray), new RectangleF(area.X, area.Y, area.Width, area.Height), sfCenter);
+            g.SetClip(area);
+            for (int i = 0; i < total; i++)
+            {
+                StartItem s = startItems[i];
+                float y = area.Y + 2 + i * rh - startScroll;
+                if (y + rh < area.Top || y > area.Bottom) continue;
+                zonesOff = y < area.Top || y + rh - 2 > area.Bottom;
+                RectangleF row = new RectangleF(area.X + 2, y, area.Width - 12, rh - 3);
+                g.FillRectangle(B(i % 2 == 0 ? Color.FromArgb(10, 20, 14) : Color.FromArgb(16, 28, 20)), row);
+                string id = "startup:" + s.Key;
+                RectangleF btn = new RectangleF(row.X + 6, y + 6, 104, 22);
+                if (s.Immune)
+                {
+                    g.FillRectangle(B(Color.FromArgb(30, 30, 40)), btn);
+                    g.DrawRectangle(P(Color.Gray), btn.X, btn.Y, btn.Width - 1, btn.Height - 1);
+                    g.DrawString("iMMuNe", fTiny, B(Color.Gray), btn, sfCenter);
+                }
+                else
+                {
+                    bool hot = Hot(id) && !Busy;
+                    Color fg = s.Pending ? Gold : s.Enabled ? Green : Red;
+                    g.FillRectangle(B(hot ? fg : s.Enabled ? Color.FromArgb(0, 45, 22) : Color.FromArgb(60, 0, 0)), btn);
+                    g.DrawRectangle(P(fg), btn.X, btn.Y, btn.Width - 1, btn.Height - 1);
+                    string txt = s.Pending ? "..." : s.Enabled ? "STaRTS" : "JaiLeD";
+                    g.DrawString(txt, fNfoB, B(hot ? Color.Black : fg), btn, sfCenter);
+                    if (!Busy) Zone(btn, id);
+                }
+                g.DrawString(s.Name, fNfoB, B(s.Enabled || s.Immune ? Color.White : Color.FromArgb(170, 170, 180)), new RectangleF(row.X + 120, y + 3, 330, 16), sfLeftMid);
+                g.DrawString(s.Command, fTiny, B(Color.FromArgb(120, 130, 120)), new RectangleF(row.X + 120, y + 18, 520, 13), sfLeftMid);
+                SizeF ss = g.MeasureString(s.Source, fTiny);
+                g.FillRectangle(B(s.Admin ? Color.FromArgb(70, 50, 0) : Color.FromArgb(0, 40, 50)), row.X + 470, y + 3, ss.Width + 4, 13);
+                g.DrawString(s.Source, fTiny, B(s.Admin ? Gold : Color.FromArgb(120, 220, 255)), row.X + 472, y + 4);
+                if (s.Admin) g.DrawString(Leet("admin"), fTiny, B(Color.FromArgb(150, 120, 40)), row.X + 476 + ss.Width, y + 4);
+                string impact = s.MB >= 300 ? "HeaVY" : s.MB >= 80 ? "MeDiuM" : s.MB > 0 ? "LiGHT" : "NoT RuNNiNG";
+                Color ic = s.MB >= 300 ? Red : s.MB >= 80 ? Color.Yellow : s.MB > 0 ? Green : Color.Gray;
+                g.DrawString(impact, fNfoB, B(ic), new RectangleF(row.Right - 190, y + 3, 100, 16), sfLeftMid);
+                if (s.MB > 0) g.DrawString(FormatSize(s.MB) + Leet(" now"), fTiny, B(Color.FromArgb(160, 170, 160)), new RectangleF(row.Right - 190, y + 19, 100, 12), sfLeftMid);
+                if (s.Bars > 0)
+                {
+                    float bw = row.Width * s.Bars;
+                    g.FillRectangle(B(Color.FromArgb((int)(60 * s.Bars), 255, 0, 0)), row.X, row.Y, bw, row.Height);
+                    for (float bx = row.X + 130; bx < row.X + bw; bx += 46)
+                        g.FillRectangle(B(Color.FromArgb(120, 170, 170, 185)), bx, row.Y, 3, row.Height);
+                }
+            }
+            zonesOff = false;
+            g.ResetClip();
+            Scrollbar(g, area.Right - 6, area.Top + 2, area.Bottom - 2, contentH, startScroll);
+            Button(g, new RectangleF(20, BtnY, 200, 32), "[ ReFReSH ]", "startup-refresh", Color.FromArgb(0, 40, 20), Green, !Busy);
+            g.DrawString(Leet("nothing is deleted. a jailed app just stops launching at login; parole flips it back. admin items ask windows first."), fSmall, B(Color.Gray), new RectangleF(232, BtnY + 2, W - 252, 30), sfWrap);
+        }
         void DrawSettings(Graphics g)
         {
             Rectangle box = new Rectangle(20, 162, W - 40, 448);
@@ -2075,7 +2189,7 @@ namespace BonkMode
                 "    aPPS THaT MiNiMiZe WHeN You HiT X",
                 "",
                 "  KeYS:",
-                "    [1-6] SCReeNS  [B] BoNK  [P] PaRoLe",
+                "    [1-7] SCReeNS  [B] BoNK  [P] PaRoLe",
                 "    [M] MuSiC  [eSC] eXiT  WHeeL SCRoLLS",
                 "",
                 "  oPeN SouRCe (aPaCHe-2.0):",
